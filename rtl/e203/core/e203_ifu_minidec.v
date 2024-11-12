@@ -23,58 +23,61 @@
 //  The mini-decode module to decode the instruction in IFU 
 //
 // ====================================================================
-`include "e203_defines.v"
+`include "e203_defines.v" 
 
+// 在取指阶段，用于对取回的指令进行部分译码
+// 不需要译出所有信息，只需要译出ifu需要的信息：指令类型，分支预测信息
 module e203_ifu_minidec(
 
   //////////////////////////////////////////////////////////////
   // The IR stage to Decoder
-  input  [`E203_INSTR_SIZE-1:0] instr,
+  input  [`E203_INSTR_SIZE-1:0] instr, // 取回的指令
   
   //////////////////////////////////////////////////////////////
   // The Decoded Info-Bus
 
 
-  output dec_rs1en,
-  output dec_rs2en,
-  output [`E203_RFIDX_WIDTH-1:0] dec_rs1idx,
-  output [`E203_RFIDX_WIDTH-1:0] dec_rs2idx,
+  output dec_rs1en, // 源寄存器1使能
+  output dec_rs2en, // 源寄存器2使能
+  output [`E203_RFIDX_WIDTH-1:0] dec_rs1idx, // 源寄存器1索引
+  output [`E203_RFIDX_WIDTH-1:0] dec_rs2idx, // 源寄存器2索引
 
-  output dec_mulhsu,
-  output dec_mul   ,
-  output dec_div   ,
-  output dec_rem   ,
-  output dec_divu  ,
-  output dec_remu  ,
+  output dec_mulhsu,//是否属于mulhsu指令，高位有符号无符号乘
+  output dec_mul   ,//是否属于mul指令，乘
+  output dec_div   ,//是否属于div指令，除
+  output dec_rem   ,//是否属于rem指令，求余数
+  output dec_divu  ,//是否属于divu指令，无符号除
+  output dec_remu  ,//是否属于remu指令，无符号求余数
 
-  output dec_rv32,
-  output dec_bjp,
-  output dec_jal,
-  output dec_jalr,
-  output dec_bxx,
-  output [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx,
-  output [`E203_XLEN-1:0] dec_bjp_imm 
+  output dec_rv32,  // 指示当前指令是16位还是32位
+  output dec_bjp,   // 指示当前指令是普通指令还是分支指令
+  output dec_jal,   // 是否属于jal指令，无条件直接跳转
+  output dec_jalr,  // 是否属于jalr指令，无条件间接跳转
+  output dec_bxx,   // 是否属于条件跳转指令 BXX(BEQ,BNE)
+  output [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx, // 无条件间接跳转指令的基址寄存器索引
+  output [`E203_XLEN-1:0] dec_bjp_imm // 有条件跳转的立即数偏移量
 
   );
 
+  // 例化一个完整的译码模块，但是将不相关的输入口接0，输出口悬空，使得综合工具将完整的decode模块中的无关逻辑优化掉，成为一个mini-decode
   e203_exu_decode u_e203_exu_decode(
 
   .i_instr(instr),
-  .i_pc(`E203_PC_SIZE'b0),
-  .i_prdt_taken(1'b0), 
-  .i_muldiv_b2b(1'b0), 
+  .i_pc(`E203_PC_SIZE'b0), // 不相关输入信号接0
+  .i_prdt_taken(1'b0), // 不相关输入信号接0
+  .i_muldiv_b2b(1'b0), // 不相关输入信号接0
 
-  .i_misalgn (1'b0),
-  .i_buserr  (1'b0),
+  .i_misalgn (1'b0),// 不相关输入信号接0
+  .i_buserr  (1'b0),// 不相关输入信号接0
 
-  .dbg_mode  (1'b0),
+  .dbg_mode  (1'b0),// 不相关输入信号接0
 
-  .dec_misalgn(),
-  .dec_buserr(),
-  .dec_ilegl(),
+  .dec_misalgn(),// 不相关输出信号悬空
+  .dec_buserr(),// 不相关输出信号悬空
+  .dec_ilegl(),// 不相关输出信号悬空
 
-  .dec_rs1x0(),
-  .dec_rs2x0(),
+  .dec_rs1x0(),// 不相关输出信号悬空
+  .dec_rs2x0(),// 不相关输出信号悬空
   .dec_rs1en(dec_rs1en),
   .dec_rs2en(dec_rs2en),
   .dec_rdwen(),

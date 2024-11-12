@@ -25,17 +25,19 @@
 // ====================================================================
 `include "e203_defines.v"
 
+//对取回的指令进行minidecode之后进行分支预测
+//采用最简单的静态分支预测
 module e203_ifu_litebpu(
 
   // Current PC
-  input  [`E203_PC_SIZE-1:0] pc,
+  input  [`E203_PC_SIZE-1:0] pc, // 当前指令的PC值
 
   // The mini-decoded info 
-  input  dec_jal,
-  input  dec_jalr,
-  input  dec_bxx,
-  input  [`E203_XLEN-1:0] dec_bjp_imm,
-  input  [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx,
+  input  dec_jal,  // 是否为jal指令
+  input  dec_jalr, // 是否为jalr指令
+  input  dec_bxx, // 是否为bxx指令
+  input  [`E203_XLEN-1:0] dec_bjp_imm,  // 跳转偏移量
+  input  [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx, // 当前指令中源寄存器1的索引，可能是基址寄存器
 
   // The IR index and OITF status to be used for checking dependency
   input  oitf_empty,
@@ -46,8 +48,8 @@ module e203_ifu_litebpu(
   // The add op to next-pc adder
   output bpu_wait,  
   output prdt_taken,  
-  output [`E203_PC_SIZE-1:0] prdt_pc_add_op1,  
-  output [`E203_PC_SIZE-1:0] prdt_pc_add_op2,
+  output [`E203_PC_SIZE-1:0] prdt_pc_add_op1,  // 将确定的基地址送出去，给加法器计算跳转目标地址
+  output [`E203_PC_SIZE-1:0] prdt_pc_add_op2,  // 将确定的偏移量送出去，给加法器计算跳转目标地址
 
   input  dec_i_valid,
 
@@ -81,8 +83,12 @@ module e203_ifu_litebpu(
   //          jump, and not-taken if it is forward jump. The target address of JAL
   //          is calculated based on current PC value and offset
 
-  // The JAL and JALR is always jump, bxxx backward is predicted as taken  
+  
+  // 预测是否跳转标志位
+  // 如果为无条件跳转指令jal、jalr，一定跳转；如果为有条件跳转bxx，并且偏移量bjp_imm为负数（向后跳），查看最高符号位是否为1，也跳转
   assign prdt_taken   = (dec_jal | dec_jalr | (dec_bxx & dec_bjp_imm[`E203_XLEN-1]));  
+  
+  
   // The JALR with rs1 == x1 have dependency or xN have dependency
   wire dec_jalr_rs1x0 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd0);
   wire dec_jalr_rs1x1 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd1);
@@ -107,11 +113,18 @@ module e203_ifu_litebpu(
 
   assign bpu_wait = jalr_rs1x1_dep | jalr_rs1xn_dep | rs1xn_rdrf_set;
 
+
+  // 确定计算跳转目标地址的两个加数，基地址+偏移量
+  // 确定基地址
+  // 如果是bxx，jal指令，均使用当前PC值作为基地址
+  // 如果是jalr指令，它所使用的基地址还需要索引通用寄存器组Regfile，为了加快速度，根据rs1中的索引值分情况讨论
+  //    1. 如果rs1中的通用寄存器索引是x0，x0是零寄存器，直接使用常数0，无需再访问Regfile
+  //    2. 如果rs1中的通用寄存器索引是x1，x1常作为链接寄存器存储函数返回跳转地址
   assign prdt_pc_add_op1 = (dec_bxx | dec_jal) ? pc[`E203_PC_SIZE-1:0]
                          : (dec_jalr & dec_jalr_rs1x0) ? `E203_PC_SIZE'b0
                          : (dec_jalr & dec_jalr_rs1x1) ? rf2bpu_x1[`E203_PC_SIZE-1:0]
                          : rf2bpu_rs1[`E203_PC_SIZE-1:0];  
-
+  // 确定偏移量
   assign prdt_pc_add_op2 = dec_bjp_imm[`E203_PC_SIZE-1:0];  
 
 endmodule
