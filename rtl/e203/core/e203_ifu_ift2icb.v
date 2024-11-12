@@ -27,6 +27,8 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// 处理32位非对齐指令的访问
+// 这个模块是IFU最复杂的模块
 module e203_ifu_ift2icb(
 
 
@@ -58,47 +60,42 @@ module e203_ifu_ift2icb(
   //output ifu_rsp_replay,   // Response error
   output [32-1:0] ifu_rsp_instr, // Response instruction
 
+
+  // * 访问ITCM的ICB接口定义
   `ifdef E203_HAS_ITCM //{
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
   // The ITCM address region indication signal
   input [`E203_ADDR_SIZE-1:0] itcm_region_indic,
   // Bus Interface to ITCM, internal protocol called ICB (Internal Chip Bus)
-  //    * Bus cmd channel
-  output ifu2itcm_icb_cmd_valid, // Handshake valid
-  input  ifu2itcm_icb_cmd_ready, // Handshake ready
-            // Note: The data on rdata or wdata channel must be naturally
-            //       aligned, this is in line with the AXI definition
+  // Bus cmd channel
+  output ifu2itcm_icb_cmd_valid, // Handshake valid 握手有效信号
+  input  ifu2itcm_icb_cmd_ready, // Handshake ready 握手准备信号
+  // Note: The data on rdata or wdata channel must be naturally
+  // aligned, this is in line with the AXI definition
   output [`E203_ITCM_ADDR_WIDTH-1:0]   ifu2itcm_icb_cmd_addr, // Bus transaction start addr 
-
-  //    * Bus RSP channel
-  input  ifu2itcm_icb_rsp_valid, // Response valid 
-  output ifu2itcm_icb_rsp_ready, // Response ready
-  input  ifu2itcm_icb_rsp_err,   // Response error
-            // Note: the RSP rdata is inline with AXI definition
+  // Bus RSP channel
+  input  ifu2itcm_icb_rsp_valid, // Response valid  应答有效信号
+  output ifu2itcm_icb_rsp_ready, // Response ready  应答准备信号
+  input  ifu2itcm_icb_rsp_err,   // Response error  应答错误信号
+  // Note: the RSP rdata is inline with AXI definition
   input  [`E203_ITCM_DATA_WIDTH-1:0] ifu2itcm_icb_rsp_rdata, 
-
   `endif//}
 
 
+  // * 访问BIU的ICB接口定义
   `ifdef E203_HAS_MEM_ITF //{
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
   // Bus Interface to System Memory, internal protocol called ICB (Internal Chip Bus)
-  //    * Bus cmd channel
-  output ifu2biu_icb_cmd_valid, // Handshake valid
-  input  ifu2biu_icb_cmd_ready, // Handshake ready
-            // Note: The data on rdata or wdata channel must be naturally
-            //       aligned, this is in line with the AXI definition
+  // Bus cmd channel
+  output ifu2biu_icb_cmd_valid, // Handshake valid  握手有效信号
+  input  ifu2biu_icb_cmd_ready, // Handshake ready  握手准备信号
+  // Note: The data on rdata or wdata channel must be naturally
+  // aligned, this is in line with the AXI definition
   output [`E203_ADDR_SIZE-1:0]   ifu2biu_icb_cmd_addr, // Bus transaction start addr 
-
-  //    * Bus RSP channel
-  input  ifu2biu_icb_rsp_valid, // Response valid 
-  output ifu2biu_icb_rsp_ready, // Response ready
-  input  ifu2biu_icb_rsp_err,   // Response error
-            // Note: the RSP rdata is inline with AXI definition
+  // Bus RSP channel
+  input  ifu2biu_icb_rsp_valid, // Response valid   应答有效信号
+  output ifu2biu_icb_rsp_ready, // Response ready   应答准备信号
+  input  ifu2biu_icb_rsp_err,   // Response error   应答错误信号
+  // Note: the RSP rdata is inline with AXI definition
   input  [`E203_SYSMEM_DATA_WIDTH-1:0] ifu2biu_icb_rsp_rdata, 
-  
   //input  ifu2biu_replay,
   `endif//}
 
@@ -388,15 +385,17 @@ module e203_ifu_ift2icb(
   wire req_need_2uop_r;
   wire req_need_0uop_r;
 
-
+  
   localparam ICB_STATE_WIDTH  = 2;
-  // State 0: The idle state, means there is no any oustanding ifetch request
+
+  // 针对非对齐取指的主要状态机控制
+  // 状态0：空闲状态
   localparam ICB_STATE_IDLE = 2'd0;
-  // State 1: Issued first request and wait response
+  // 状态1：如果非对齐操作需要进行两次读取操作，这是第一次读取
   localparam ICB_STATE_1ST  = 2'd1;
-  // State 2: Wait to issue second request 
+  // 状态2：第一次读取和第二次读取之间的等待状态 
   localparam ICB_STATE_WAIT2ND  = 2'd2;
-  // State 3: Issued second request and wait response
+  // 状态3：如果非对齐操作需要进行两次读取操作，这是第二次读取
   localparam ICB_STATE_2ND  = 2'd3;
   
   wire [ICB_STATE_WIDTH-1:0] icb_state_nxt;
@@ -548,9 +547,10 @@ module e203_ifu_ift2icb(
                       | (icb_cmd2biu_r & ifu2biu_icb_rsp_err)
                      `endif//}
                       ;
+  // 加载剩余缓存的使能信号
+  assign leftover_ena = holdup2leftover_ena //当顺序取指跨界时，使能剩余缓存，将当前ITCM输出的高16位存入剩余缓存leftover buffer
+                      | uop1st2leftover_ena;//当非对齐取指跨界时，由于要发起两次读操作，将第一次读操作的结果返回后取出其高16位存入leftover_buffer
 
-  assign leftover_ena = holdup2leftover_ena 
-                      | uop1st2leftover_ena;
 
   assign leftover_nxt = 
                       //  ({16{holdup2leftover_sel}} & holdup2leftover_data[15:0]) 
@@ -562,7 +562,7 @@ module e203_ifu_ift2icb(
                         (holdup2leftover_sel & 1'b0)
                       | (uop1st2leftover_sel & uop1st2leftover_err) 
                       ;
-
+  // 实现剩余缓存的寄存器
   sirv_gnrl_dffl #(16) leftover_dffl     (leftover_ena, leftover_nxt,     leftover_r,     clk);
   sirv_gnrl_dfflr #(1) leftover_err_dfflr(leftover_ena, leftover_err_nxt, leftover_err_r, clk, rst_n);
   
@@ -593,7 +593,8 @@ module e203_ifu_ift2icb(
                         ;
 
 
-  // The fetched instruction from ICB rdata bus need to be aligned by PC LSB bits
+ 
+  // The fetched instruction from ICB rdata bus need to be aligned by PC LSB bits（最低有效位）
   `ifdef E203_HAS_ITCM //{
   wire[31:0] ifu2itcm_icb_rsp_instr = 
      `ifdef E203_ITCM_DATA_WIDTH_IS_32 //{
@@ -612,6 +613,7 @@ module e203_ifu_ift2icb(
      `endif//}
   `endif//}
 
+  // 访问BIU的ICB接口
   `ifdef E203_HAS_MEM_ITF //{
   wire[31:0] ifu2biu_icb_rsp_instr = 
      `ifdef E203_SYSMEM_DATA_WIDTH_IS_32 //{
@@ -786,43 +788,51 @@ module e203_ifu_ift2icb(
 
 
 
-
-  ///////////////////////////////////////////////////////
+  //======================================================================================================
   // Dispatch the ICB CMD and RSP Channel to ITCM and System Memory
   //   according to the address range
-  `ifdef E203_HAS_ITCM //{
+  // 判断地址访问地址区间是否在ITCM区间
+  `ifdef E203_HAS_ITCM 
+  // 使用比较逻辑去比较访问地址的高位基地址是否是ITCM的基地址，如果是，说明地址访问区间位于ITCM地址区间内
   assign ifu_icb_cmd2itcm = (ifu_icb_cmd_addr[`E203_ITCM_BASE_REGION] == itcm_region_indic[`E203_ITCM_BASE_REGION]);
-
+  // 如果访问ITCM（ifu_icb_cmd_valid=1），则将ITCM的 ICB command channel的valid信号拉高
   assign ifu2itcm_icb_cmd_valid = ifu_icb_cmd_valid & ifu_icb_cmd2itcm;
+  // 取出ITCM的访问地址
   assign ifu2itcm_icb_cmd_addr = ifu_icb_cmd_addr[`E203_ITCM_ADDR_WIDTH-1:0];
 
   assign ifu2itcm_icb_rsp_ready = ifu_icb_rsp_ready;
-  `endif//}
+  `endif
+  //======================================================================================================
 
-  `ifdef E203_HAS_MEM_ITF //{
+
+
+  //======================================================================================================
+  // 判断地址访问地址区间是否在BIU区间
+  `ifdef E203_HAS_MEM_ITF 
   assign ifu_icb_cmd2biu = 1'b1
-            `ifdef E203_HAS_ITCM //{
-              & ~(ifu_icb_cmd2itcm)
-            `endif//}
-              ;
+            `ifdef E203_HAS_ITCM 
+              & ~(ifu_icb_cmd2itcm) // 如果没有在itcm区间，那么就在biu区间
+            `endif;
+  // 如果访问biu（ifu_icb_cmd2biu=1），则将ICB Command channel的valid信号拉高
   wire ifu2biu_icb_cmd_valid_pre  = ifu_icb_cmd_valid & ifu_icb_cmd2biu;
+  // 取出访问地址
   wire [`E203_ADDR_SIZE-1:0]   ifu2biu_icb_cmd_addr_pre = ifu_icb_cmd_addr[`E203_ADDR_SIZE-1:0];
-
   assign ifu2biu_icb_rsp_ready = ifu_icb_rsp_ready;
-
   wire ifu2biu_icb_cmd_ready_pre;
-  `endif//}
+  `endif
+  //======================================================================================================
+
+
 
   assign ifu_icb_cmd_ready = 1'b0
-    `ifdef E203_HAS_ITCM //{
+    `ifdef E203_HAS_ITCM 
         | (ifu_icb_cmd2itcm & ifu2itcm_icb_cmd_ready) 
-    `endif//}
-    `ifdef E203_HAS_MEM_ITF //{
+    `endif macro
+    `ifdef E203_HAS_MEM_ITF 
         | (ifu_icb_cmd2biu  & ifu2biu_icb_cmd_ready_pre ) 
-    `endif//}
-        ;
+    `endif;
 
-    `ifdef E203_HAS_MEM_ITF //{
+    `ifdef E203_HAS_MEM_ITF 
   //sirv_gnrl_pipe_stage # (
   //      // We must not cut ready, otherwise it cannot accept ifetch back-to-back,
   //      //   and then when the external bus is 0 cycle response, it will trigger 

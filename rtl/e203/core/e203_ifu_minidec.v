@@ -96,7 +96,7 @@ module e203_ifu_minidec(
   .dec_divu  (dec_divu  ),
   .dec_remu  (dec_remu  ),
 
-  .dec_rv32(dec_rv32),
+  .dec_rv32(dec_rv32), // 指示当前指令是16位还是32位
   .dec_bjp (dec_bjp ),
   .dec_jal (dec_jal ),
   .dec_jalr(dec_jalr),

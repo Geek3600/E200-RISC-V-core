@@ -27,6 +27,7 @@
 
 //对取回的指令进行minidecode之后进行分支预测
 //采用最简单的静态分支预测
+//该模块并没有直接生成分支预测之后的PC，只是预测，最终要需要借助其他模块才能得到预测的PC值
 module e203_ifu_litebpu(
 
   // Current PC
@@ -46,15 +47,15 @@ module e203_ifu_litebpu(
   input  jalr_rs1idx_cam_irrdidx,
   
   // The add op to next-pc adder
-  output bpu_wait,  
-  output prdt_taken,  
+  output bpu_wait,     // 存在RAW依赖，需要等待
+  output prdt_taken,    // 预测是否跳转标志位
   output [`E203_PC_SIZE-1:0] prdt_pc_add_op1,  // 将确定的基地址送出去，给加法器计算跳转目标地址
   output [`E203_PC_SIZE-1:0] prdt_pc_add_op2,  // 将确定的偏移量送出去，给加法器计算跳转目标地址
 
   input  dec_i_valid,
 
   // The RS1 to read regfile
-  output bpu2rf_rs1_ena,
+  output bpu2rf_rs1_ena,   // 使能Regfile去读取rs1中的值的标志位
   input  ir_valid_clr,
   input  [`E203_XLEN-1:0] rf2bpu_x1,
   input  [`E203_XLEN-1:0] rf2bpu_rs1,
@@ -89,42 +90,62 @@ module e203_ifu_litebpu(
   assign prdt_taken   = (dec_jal | dec_jalr | (dec_bxx & dec_bjp_imm[`E203_XLEN-1]));  
   
   
-  // The JALR with rs1 == x1 have dependency or xN have dependency
+
+  //判断间接跳转指令中源寄存器1中的索引是哪一种寄存器
+  //判断rs1中的索引是否是x0
   wire dec_jalr_rs1x0 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd0);
+  //判断rs1中的索引是否是x1
   wire dec_jalr_rs1x1 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd1);
+  // 判断rs1中的索引既不是x0也不是x1
   wire dec_jalr_rs1xn = (~dec_jalr_rs1x0) & (~dec_jalr_rs1x1);
 
+  // 表示如果输入指令有效（dec_i_valid=1），并且是jalr指令（dec_jalr=1），并且rs1中的索引是x1（dec_jalr_rs1x1=1），并且有长指令正在执行
+  //（~oitf_empty=1）（可能会写x1，也可能不会，但是在此保守估计），或者IR寄存器中的指令的写回寄存器为x1（jalr_rs1idx_cam_irrdidx=1）
   wire jalr_rs1x1_dep = dec_i_valid & dec_jalr & dec_jalr_rs1x1 & ((~oitf_empty) | (jalr_rs1idx_cam_irrdidx));
+
+  // 表示如果输入指令有效（dec_i_valid=1），并且是jalr指令（dec_jalr=1），并且rs1中的索引既不是x0也不是x1（dec_jalr_rs1xn=1），并且有长指令正在执行
+  //（~oitf_empty=1）（可能会写x1，也可能不会，但是在此保守估计），或者IR寄存器中的指令可能写回寄存器为xn（~ir_empty=1）（同样是保守估计）
   wire jalr_rs1xn_dep = dec_i_valid & dec_jalr & dec_jalr_rs1xn & ((~oitf_empty) | (~ir_empty));
 
-                      // If only depend to IR stage (OITF is empty), then if IR is under clearing, or
-                          // it does not use RS1 index, then we can also treat it as non-dependency
+  //TODO
   wire jalr_rs1xn_dep_ir_clr = (jalr_rs1xn_dep & oitf_empty & (~ir_empty)) & (ir_valid_clr | (~ir_rs1en));
 
-  wire rs1xn_rdrf_r;
+  wire rs1xn_rdrf_r;// Regfile的输出
+
+  // rs1xn_rdrf_set：拉高表示Regfile的第一个读端口正在处于征用状态
+  //TODO
   wire rs1xn_rdrf_set = (~rs1xn_rdrf_r) & dec_i_valid & dec_jalr & dec_jalr_rs1xn & ((~jalr_rs1xn_dep) | jalr_rs1xn_dep_ir_clr);
   wire rs1xn_rdrf_clr = rs1xn_rdrf_r;
   wire rs1xn_rdrf_ena = rs1xn_rdrf_set |   rs1xn_rdrf_clr;
   wire rs1xn_rdrf_nxt = rs1xn_rdrf_set | (~rs1xn_rdrf_clr);
 
+  //带load使能的D触发器，不是Regfile，暂时不知有什么作用，打一拍？
+  //TODO
   sirv_gnrl_dfflr #(1) rs1xn_rdrf_dfflrs(rs1xn_rdrf_ena, rs1xn_rdrf_nxt, rs1xn_rdrf_r, clk, rst_n);
 
+  // bpu2rf_rs1_ena：拉高表示Regfile的第一个读端口正在处于征用状态
   assign bpu2rf_rs1_ena = rs1xn_rdrf_set;
 
+  // 如果x1存在RAW相关（jalr_rs1x1_dep=1），则bpu_wait拉高，IFU进入等待状态，停止计算下一个PC值
+  // 如果xn存在RAW相关（jalr_rs1xn_dep=1），则bpu_wait拉高，IFU进入等待状态，停止计算下一个PC值
+  // 如果Regfile的第一个读端口正在处于征用状态（rs1xn_rdrf_set=1），说明正在读取xn中的基地址值，需要等待读取完毕
   assign bpu_wait = jalr_rs1x1_dep | jalr_rs1xn_dep | rs1xn_rdrf_set;
 
 
+  //=====================================================================================
   // 确定计算跳转目标地址的两个加数，基地址+偏移量
   // 确定基地址
   // 如果是bxx，jal指令，均使用当前PC值作为基地址
   // 如果是jalr指令，它所使用的基地址还需要索引通用寄存器组Regfile，为了加快速度，根据rs1中的索引值分情况讨论
   //    1. 如果rs1中的通用寄存器索引是x0，x0是零寄存器，直接使用常数0，无需再访问Regfile
-  //    2. 如果rs1中的通用寄存器索引是x1，x1常作为链接寄存器存储函数返回跳转地址
+  //    2. 如果rs1中的通用寄存器索引是x1，x1常作为链接寄存器存储函数返回跳转地址，可以直接从EXU中将x1取出，但可能存在RAW冒险
+  //            dec_jalr & dec_jalr_rs1x0：表示如果是jalr指令并且rs1中的索引是x0
+  //            dec_jalr & dec_jalr_rs1x1：表示如果是jalr指令并且rs1中的索引是x1
   assign prdt_pc_add_op1 = (dec_bxx | dec_jal) ? pc[`E203_PC_SIZE-1:0]
                          : (dec_jalr & dec_jalr_rs1x0) ? `E203_PC_SIZE'b0
-                         : (dec_jalr & dec_jalr_rs1x1) ? rf2bpu_x1[`E203_PC_SIZE-1:0]
+                         : (dec_jalr & dec_jalr_rs1x1) ?  rf2bpu_x1[`E203_PC_SIZE-1:0] // 如果是jalr指令并且rs1中为x1，则使用从Regfile中硬连线出来得到的值
                          : rf2bpu_rs1[`E203_PC_SIZE-1:0];  
   // 确定偏移量
   assign prdt_pc_add_op2 = dec_bjp_imm[`E203_PC_SIZE-1:0];  
-
+ //=========================================================================================
 endmodule

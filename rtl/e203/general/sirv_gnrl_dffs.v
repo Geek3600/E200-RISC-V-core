@@ -111,7 +111,7 @@ assign qout = qout_r;
 `ifndef FPGA_SOURCE//{
 `ifndef DISABLE_SV_ASSERTION//{
 //synopsys translate_off
-sirv_gnrl_xchecker # (
+sirv_gnrl_xchecker # ( // 查看是否是不定态
   .DW(1)
 ) sirv_gnrl_xchecker(
   .i_dat(lden),

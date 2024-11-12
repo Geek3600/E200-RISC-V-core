@@ -26,13 +26,11 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// PC生成
 module e203_ifu_ifetch(
   output[`E203_PC_SIZE-1:0] inspect_pc,
+  input  [`E203_PC_SIZE-1:0] pc_rtvec,  // 如果是reset后第一次取指，将该输入值作为第一次取指的PC值
 
-
-  input  [`E203_PC_SIZE-1:0] pc_rtvec,  
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
   // Fetch Interface to memory system, internal protocol
   //    * IFetch REQ channel
   output ifu_req_valid, // Handshake valid
@@ -105,6 +103,8 @@ module e203_ifu_ifetch(
   input  clk,
   input  rst_n
   );
+
+
 
   wire ifu_req_hsked  = (ifu_req_valid & ifu_req_ready) ;
   wire ifu_rsp_hsked  = (ifu_rsp_valid & ifu_rsp_ready) ;
@@ -373,7 +373,7 @@ module e203_ifu_ifetch(
       .dec_rs1idx  (minidec_rs1idx     ),
       .dec_rs2idx  (minidec_rs2idx     ),
 
-      .dec_rv32    (minidec_rv32       ),
+      .dec_rv32    (minidec_rv32       ),// 指示当前指令是16位还是32位
       .dec_bjp     (minidec_bjp        ),
       .dec_jal     (minidec_jal        ),
       .dec_jalr    (minidec_jalr       ),
@@ -428,48 +428,59 @@ module e203_ifu_ifetch(
     .clk                      (clk  ) ,
     .rst_n                    (rst_n )                 
   );
-  // If the instruciton is 32bits length, increament 4, otherwise 2
+  
+  // PC自增量，如果是16位压缩指令，则自增2；如果是32位指令，则自增4
   wire [2:0] pc_incr_ofst = minidec_rv32 ? 3'd4 : 3'd2;
 
   wire [`E203_PC_SIZE-1:0] pc_nxt_pre;
   wire [`E203_PC_SIZE-1:0] pc_nxt;
 
+  //跳转取指标志：如果mini-decoder译码发现是条件跳转指令，并且bpu预测需要跳转
   wire bjp_req = minidec_bjp & prdt_taken;
 
   wire ifetch_replay_req;
 
+  //由于PC的计算公用一个加法器，所以需要选择加法器的输入
   wire [`E203_PC_SIZE-1:0] pc_add_op1 = 
                             `ifndef E203_TIMING_BOOST//}
-                               pipe_flush_req  ? pipe_flush_add_op1 :
-                               dly_pipe_flush_req  ? pc_r :
+                               pipe_flush_req  ? pipe_flush_add_op1 : // 如果EXU产生流水线冲刷
+                               dly_pipe_flush_req  ? pc_r :  
                             `endif//}
-                               ifetch_replay_req  ? pc_r :
-                               bjp_req ? prdt_pc_add_op1    :
-                               ifu_reset_req   ? pc_rtvec :
-                                                 pc_r;
+                               ifetch_replay_req  ? pc_r : // 如果取指步骤重来，则保持当前pc值
+                               bjp_req ? prdt_pc_add_op1 : // 如果需要跳转，则使用bpu产生的加数1
+                               ifu_reset_req   ? pc_rtvec: // 如果是reset后取指，则使用pc_rtvec的值
+                                                 pc_r;     // 如果是顺序取指，则使用当前pc值作为加法器加数1
 
   wire [`E203_PC_SIZE-1:0] pc_add_op2 =  
                             `ifndef E203_TIMING_BOOST//}
                                pipe_flush_req  ? pipe_flush_add_op2 :
                                dly_pipe_flush_req  ? `E203_PC_SIZE'b0 :
                             `endif//}
-                               ifetch_replay_req  ? `E203_PC_SIZE'b0 :
-                               bjp_req ? prdt_pc_add_op2    :
-                               ifu_reset_req   ? `E203_PC_SIZE'b0 :
-                                                 pc_incr_ofst ;
-
+                               ifetch_replay_req  ? `E203_PC_SIZE'b0: // 如果取指步骤重来，加法器加数2为0，最终加法器结果保持当前指令
+                               bjp_req ? prdt_pc_add_op2            : // 如果需要跳转，则使用bpu产生的加数2
+                               ifu_reset_req   ? `E203_PC_SIZE'b0   : // 如果是reset后取指，则使用pc_rtvec的值，加法器加数2为0
+                                                 pc_incr_ofst ;       // 如果是顺序取指，pc值自增
+  
+  //顺序取指标志：没有reset，没有flush冲刷，也不需要将取指步骤重新执行，也不是跳转指令
   assign ifu_req_seq = (~pipe_flush_req_real) & (~ifu_reset_req) & (~ifetch_replay_req) & (~bjp_req);
+  
+  // 指示当前指令是否是32位，否则为16位
   assign ifu_req_seq_rv32 = minidec_rv32;
+
+  // 保存当前pc值，作为上一个pc值
   assign ifu_req_last_pc = pc_r;
 
+  // 加法器计算下一条待取指令的pc初步值，但是这还不是真正的下一条待取指令的pc值
   assign pc_nxt_pre = pc_add_op1 + pc_add_op2;
+  
+  // 计算真正的下一条待取指令的pc最终值
   `ifndef E203_TIMING_BOOST//}
   assign pc_nxt = {pc_nxt_pre[`E203_PC_SIZE-1:1],1'b0};
   `else//}{
   assign pc_nxt = 
-               pipe_flush_req ? {pipe_flush_pc[`E203_PC_SIZE-1:1],1'b0} :
+               pipe_flush_req ? {pipe_flush_pc[`E203_PC_SIZE-1:1],1'b0} : // 如果发生流水线冲刷，则使用EXU送过来的pc值
                dly_pipe_flush_req ? {pc_r[`E203_PC_SIZE-1:1],1'b0} :
-               {pc_nxt_pre[`E203_PC_SIZE-1:1],1'b0};
+               {pc_nxt_pre[`E203_PC_SIZE-1:1],1'b0}; // 否则使用之前计算的pc初步值 
   `endif//}
 
   // The Ifetch issue new ifetch request when
@@ -504,13 +515,14 @@ module e203_ifu_ifetch(
   // The PC will need to be updated when ifu req channel handshaked or a flush is incoming
   wire pc_ena = ifu_req_hsked | pipe_flush_hsked;
 
+  // pc寄存器，将下一条待取指令的pc值（pc_nxt）存入pc寄存器，并取出当前要执行指令的pc值（pc_r）
   sirv_gnrl_dfflr #(`E203_PC_SIZE) pc_dfflr (pc_ena, pc_nxt, pc_r, clk, rst_n);
 
 
- assign inspect_pc = pc_r;
+  assign inspect_pc = pc_r;
 
 
-  assign ifu_req_pc    = pc_nxt;
+  assign ifu_req_pc = pc_nxt;
 
      // The out_flag will be set if there is a new request handshaked
   wire out_flag_set = ifu_req_hsked;
