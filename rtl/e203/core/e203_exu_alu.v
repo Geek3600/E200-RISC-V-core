@@ -33,6 +33,7 @@ module e203_exu_alu(
 
   //////////////////////////////////////////////////////////////
   // The operands and decode info from dispatch
+  //valid-ready模式握手信号
   input  i_valid, 
   output i_ready, 
 
@@ -157,14 +158,22 @@ module e203_exu_alu(
 
   //////////////////////////////////////////////////////////////
   // Dispatch to different sub-modules according to their types
-
+  // 对于发生取指异常的指令，单独列为一种类型，无需被具体的执行单元执行
   wire ifu_excp_op = i_ilegl | i_buserr | i_misalgn;
-  wire alu_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_ALU); 
-  wire agu_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_AGU); 
-  wire bjp_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_BJP); 
-  wire csr_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_CSR); 
+
+  //通过decode模块中译码生成的分组信息进行判断，判别出需要什么单元此指令，
+  //ALU主要包括6个功能子单元
+  // 1. 普通ALU计算（Regular-ALU）：逻辑运算，加减法，移位等
+  // 2. 访存地址生成（AGU）：负责load，store和A扩展指令的地址生成
+  // 3. 分支预测解析（BJP）：负责branch和jump指令的结果解析和执行
+  // 4. CSR读写控制（CSR-CTRL）：负责CSR指令的执行
+  // 5. 多周期乘除法（MDV）：负责乘法和除法指令的执行
+  wire alu_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_ALU); //普通ALU计算（Regular-ALU）
+  wire agu_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_AGU); //访存地址生成（AGU）
+  wire bjp_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_BJP); //分支预测解析（BJP）
+  wire csr_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_CSR); //CSR读写控制（CSR-CTRL）
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
-  wire mdv_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_MULDIV); 
+  wire mdv_op = (~ifu_excp_op) & (i_info[`E203_DECINFO_GRP] == `E203_DECINFO_GRP_MULDIV);//多周期乘除法（MDV） 
 `endif//E203_SUPPORT_SHARE_MULDIV}
 
   // The ALU incoming instruction may go to several different targets:
@@ -173,6 +182,11 @@ module e203_exu_alu(
   //   * The AGU if it is a load/store relevant instructions
   //   * The MULDIV if it is a MUL/DIV relevant instructions and MULDIV
   //       is reusing the ALU adder
+
+  //根据不同指令分组指示信号，将对应子单元的输入valid信号拉高，表明需要使用该子单元
+  //并且选择对应子单元的ready信号作为反馈给上游派遣模块的ready握手信号，通过此方式完成指令的派遣
+  
+  //将对应子单元的输入valid信号拉高 
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
   wire mdv_i_valid = i_valid & mdv_op;
 `endif//E203_SUPPORT_SHARE_MULDIV}
@@ -181,6 +195,7 @@ module e203_exu_alu(
   wire bjp_i_valid = i_valid & bjp_op;
   wire csr_i_valid = i_valid & csr_op;
   wire ifu_excp_i_valid = i_valid & ifu_excp_op;
+
 
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
   wire mdv_i_ready;
@@ -191,6 +206,7 @@ module e203_exu_alu(
   wire csr_i_ready;
   wire ifu_excp_i_ready;
 
+  //使用对应子单元的ready信号作为反馈，给上游派遣模块的ready握手信号，表示对应子模块已经收到了派遣的指令
   assign i_ready =   (agu_i_ready & agu_op)
                    `ifdef E203_SUPPORT_SHARE_MULDIV //{
                    | (mdv_i_ready & mdv_op)

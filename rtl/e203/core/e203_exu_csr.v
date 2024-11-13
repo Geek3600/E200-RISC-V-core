@@ -25,15 +25,17 @@
 //
 // ====================================================================
 `include "e203_defines.v"
-
+// CSR寄存器模块
+// 主要用于实现e200所支持的CSR寄存器功能
+// 严格按照RISC-V架构的定义实现各个CSR寄存器的具体功能
 module e203_exu_csr(
   input nonflush_cmt_ena,
   output eai_xs_off,
 
-  input csr_ena,
-  input csr_wr_en,
-  input csr_rd_en,
-  input [12-1:0] csr_idx,
+  input csr_ena,   // 来自ALU的CSR读写使能信号
+  input csr_wr_en,  // CSR写操作使能信号
+  input csr_rd_en,  // CSR读操作使能信号
+  input [12-1:0] csr_idx,  //CSR寄存器索引（地址）
 
   output csr_access_ilgl,
   output tm_stop,
@@ -43,8 +45,8 @@ module e203_exu_csr(
   output mdv_nob2b,
 
 
-  output [`E203_XLEN-1:0] read_csr_dat,
-  input  [`E203_XLEN-1:0] wbck_csr_dat,
+  output [`E203_XLEN-1:0] read_csr_dat,   // 读操作从CSR寄存器模块读出的数据
+  input  [`E203_XLEN-1:0] wbck_csr_dat,   // 写操作写入CSR寄存器模块的数据
    
   input  [`E203_HART_ID_W-1:0] core_mhartid,
   input  ext_irq_r,
@@ -289,11 +291,12 @@ wire [`E203_XLEN-1:0] csr_mip = ip_r;
 //0x005 URW utvec User trap handler base address.
 //  We dont support user trap, so no utvec needed
 //0x305 MRW mtvec Machine trap-handler base address.
-wire sel_mtvec = (csr_idx == 12'h305);
-wire rd_mtvec = csr_rd_en & sel_mtvec;
+// 实现MTVEC寄存器
+wire sel_mtvec = (csr_idx == 12'h305); // 对CSR寄存器索引进行译码判断是否选中mtvec
+wire rd_mtvec = csr_rd_en & sel_mtvec; // mtvec寄存器读使能，当csr读使能有效，并且csr寄存器索引为mtvec时
 `ifdef E203_SUPPORT_MTVEC //{
-wire wr_mtvec = sel_mtvec & csr_wr_en;
-wire mtvec_ena = (wr_mtvec & wbck_csr_wen);
+wire wr_mtvec = sel_mtvec & csr_wr_en; // mtvec寄存器写信号，当csr写使能有效，并且csr寄存器索引为mtvec时
+wire mtvec_ena = (wr_mtvec & wbck_csr_wen);  // mtvec寄存器写使能信号，当csr写使能有效，并且csr寄存器索引为mtvec时
 wire [`E203_XLEN-1:0] mtvec_r;
 wire [`E203_XLEN-1:0] mtvec_nxt = wbck_csr_dat;
 sirv_gnrl_dfflr #(`E203_XLEN) mtvec_dfflr (mtvec_ena, mtvec_nxt, mtvec_r, clk, rst_n);

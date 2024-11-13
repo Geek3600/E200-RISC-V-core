@@ -26,37 +26,39 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// 对IR寄存器中的指令进行译码
 module e203_exu_decode(
 
-  //////////////////////////////////////////////////////////////
   // The IR stage to Decoder
-  input  [`E203_INSTR_SIZE-1:0] i_instr,
-  input  [`E203_PC_SIZE-1:0] i_pc,
-  input  i_prdt_taken, 
-  input  i_misalgn,              // The fetch misalign
-  input  i_buserr,               // The fetch bus error
+  // 来自于IFU输入EXU的信号
+  input  [`E203_INSTR_SIZE-1:0] i_instr, // 来自于IFU的32位指令
+  input  [`E203_PC_SIZE-1:0] i_pc,       // 来自于IFU当前指令对应的PC值
+  input  i_prdt_taken,                   // 预测跳转标志
+  input  i_misalgn,                      // 表明当前指令是否遭遇取指非对齐异常
+  input  i_buserr,                       // 表明当前指令遭遇了取指存储器访问异常
   input  i_muldiv_b2b,           // The back2back case for mul/div
 
   input  dbg_mode,
   //////////////////////////////////////////////////////////////
   // The Decoded Info-Bus
-
-  output dec_rs1x0,
-  output dec_rs2x0,
-  output dec_rs1en,
-  output dec_rs2en,
-  output dec_rdwen,
-  output [`E203_RFIDX_WIDTH-1:0] dec_rs1idx,
-  output [`E203_RFIDX_WIDTH-1:0] dec_rs2idx,
-  output [`E203_RFIDX_WIDTH-1:0] dec_rdidx,
-  output [`E203_DECINFO_WIDTH-1:0] dec_info,  
-  output [`E203_XLEN-1:0] dec_imm,
+  // 对IR中的指令进行译码之后得到的信息
+  output dec_rs1x0,    // 该指令中源寄存器1是否为x0 
+  output dec_rs2x0,    // 该指令中源寄存器2是否为x0
+  output dec_rs1en,    // 该指令需要读取源寄存器1，也意味着不是x0
+  output dec_rs2en,    // 该指令需要读取源寄存器2，也意味着不是x0
+  output dec_rdwen,    // 该指令需要将结果写入目的寄存器
+  output [`E203_RFIDX_WIDTH-1:0] dec_rs1idx, // 该指令源寄存器1的索引
+  output [`E203_RFIDX_WIDTH-1:0] dec_rs2idx, // 该指令源寄存器2的索引
+  output [`E203_RFIDX_WIDTH-1:0] dec_rdidx,  // 该指令目的寄存器的索引
+  output [`E203_DECINFO_WIDTH-1:0] dec_info, // 该指令的其他信息，打包为一组宽信号，称之为信息总线
+  output [`E203_XLEN-1:0] dec_imm,           // 该指令使用的立即数
   output [`E203_PC_SIZE-1:0] dec_pc,
-  output dec_misalgn,
-  output dec_buserr,
-  output dec_ilegl,
+  output dec_misalgn, // 表明当前指令是否遭遇取指非对齐异常
+  output dec_buserr,  // 表明当前指令遭遇了取指存储器访问异常
+  output dec_ilegl,   // 该指令是否是非法指令
   
-
+  //==========================================================
+  // 表明当前指令是下面哪一种操作
   output dec_mulhsu,
   output dec_mul   ,
   output dec_div   ,
@@ -64,44 +66,49 @@ module e203_exu_decode(
   output dec_divu  ,
   output dec_remu  ,
 
-  output dec_rv32,
+  output dec_rv32, // 是否是32位指令
   output dec_bjp,
   output dec_jal,
   output dec_jalr,
   output dec_bxx,
+  //================================================================
 
-  output [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx,
-  output [`E203_XLEN-1:0] dec_bjp_imm 
+  output [`E203_RFIDX_WIDTH-1:0] dec_jalr_rs1idx, // 无条件间接跳转的源寄存器1索引
+  output [`E203_XLEN-1:0] dec_bjp_imm  // 有条件跳转的偏移量
   );
 
 
 
-  wire [32-1:0] rv32_instr = i_instr;
-  wire [16-1:0] rv16_instr = i_instr[15:0];
+  wire [32-1:0] rv32_instr = i_instr;       // 待译码的32位指令
+  wire [16-1:0] rv16_instr = i_instr[15:0]; // 待译码的16位指令
 
-  wire [6:0]  opcode = rv32_instr[6:0];
+  wire [6:0]  opcode = rv32_instr[6:0];     // 提取操作码
 
+  //===================================================================
+  // 判断操作码类型
   wire opcode_1_0_00  = (opcode[1:0] == 2'b00);
   wire opcode_1_0_01  = (opcode[1:0] == 2'b01);
   wire opcode_1_0_10  = (opcode[1:0] == 2'b10);
   wire opcode_1_0_11  = (opcode[1:0] == 2'b11);
+  //===================================================================
 
+  // 指示该指令为32位指令还是16位指令
   wire rv32 = (~(i_instr[4:2] == 3'b111)) & opcode_1_0_11;
 
+  // 取出32位指令的关键编码段
   wire [4:0]  rv32_rd     = rv32_instr[11:7];
   wire [2:0]  rv32_func3  = rv32_instr[14:12];
   wire [4:0]  rv32_rs1    = rv32_instr[19:15];
   wire [4:0]  rv32_rs2    = rv32_instr[24:20];
   wire [6:0]  rv32_func7  = rv32_instr[31:25];
 
+  // 取出16位指令的关键编码段
   wire [4:0]  rv16_rd     = rv32_rd;
   wire [4:0]  rv16_rs1    = rv16_rd; 
   wire [4:0]  rv16_rs2    = rv32_instr[6:2];
-
   wire [4:0]  rv16_rdd    = {2'b01,rv32_instr[4:2]};
   wire [4:0]  rv16_rss1   = {2'b01,rv32_instr[9:7]};
   wire [4:0]  rv16_rss2   = rv16_rdd;
-
   wire [2:0]  rv16_func3  = rv32_instr[15:13];
 
   
@@ -179,6 +186,7 @@ module e203_exu_decode(
   wire rv32_rs2_x31 = (rv32_rs2 == 5'b11111);
   wire rv32_rd_x31  = (rv32_rd  == 5'b11111);
 
+  // 对32位指令类型进行译码
   wire rv32_load     = opcode_6_5_00 & opcode_4_2_000 & opcode_1_0_11; 
   wire rv32_store    = opcode_6_5_01 & opcode_4_2_000 & opcode_1_0_11; 
   wire rv32_madd     = opcode_6_5_10 & opcode_4_2_000 & opcode_1_0_11; 
@@ -219,10 +227,11 @@ module e203_exu_decode(
   wire rv32_custom2  = opcode_6_5_10 & opcode_4_2_110 & opcode_1_0_11; 
   wire rv32_custom3  = opcode_6_5_11 & opcode_4_2_110 & opcode_1_0_11; 
 
+
+  // 对16位指令类型进行译码
   wire rv16_addi4spn     = opcode_1_0_00 & rv16_func3_000;//
   wire rv16_lw           = opcode_1_0_00 & rv16_func3_010;//
   wire rv16_sw           = opcode_1_0_00 & rv16_func3_110;//
-
 
   wire rv16_addi         = opcode_1_0_01 & rv16_func3_000;//
   wire rv16_jal          = opcode_1_0_01 & rv16_func3_001;//
@@ -232,7 +241,6 @@ module e203_exu_decode(
   wire rv16_j            = opcode_1_0_01 & rv16_func3_101;//
   wire rv16_beqz         = opcode_1_0_01 & rv16_func3_110;//
   wire rv16_bnez         = opcode_1_0_01 & rv16_func3_111;//
-
 
   wire rv16_slli         = opcode_1_0_10 & rv16_func3_000;//
   wire rv16_lwsp         = opcode_1_0_10 & rv16_func3_010;//
@@ -345,6 +353,9 @@ module e203_exu_decode(
   wire rv32_fence  ;
   wire rv32_fence_i;
   wire rv32_fence_fencei;
+
+
+  //生成BJP单元所需的信息总线
   wire bjp_op = dec_bjp | rv32_mret | (rv32_dret & (~rv32_dret_ilgl)) | rv32_fence_fencei;
 
   wire [`E203_DECINFO_BJP_WIDTH-1:0] bjp_info_bus;
@@ -396,6 +407,7 @@ module e203_exu_decode(
   // The ALU group of instructions will be handled by 1cycle ALU-datapath
   wire ecall_ebreak = rv32_ecall | rv32_ebreak | rv16_ebreak;
 
+  // 生成 Regular ALU单元所需的信息总线
   wire alu_op = (~rv32_sxxi_shamt_ilgl) & (~rv16_sxxi_shamt_ilgl) 
               & (~rv16_li_lui_ilgl) & (~rv16_addi4spn_ilgl) & (~rv16_addi16sp_ilgl) & 
               ( rv32_op_imm 
@@ -440,7 +452,7 @@ module e203_exu_decode(
   assign alu_info_bus[`E203_DECINFO_ALU_WFI  ]  = rv32_wfi;
 
 
-  
+  // 生成CSR单元所需的信息总线
   wire csr_op = rv32_csr;
   wire [`E203_DECINFO_CSR_WIDTH-1:0] csr_info_bus;
   assign csr_info_bus[`E203_DECINFO_GRP    ]    = `E203_DECINFO_GRP_CSR;
@@ -473,6 +485,8 @@ module e203_exu_decode(
   wire rv32_rem      = rv32_op     & rv32_func3_110 & rv32_func7_0000001;
   wire rv32_remu     = rv32_op     & rv32_func3_111 & rv32_func7_0000001;
   
+
+  // 生成乘除法单元所需的信息总线
   // The MULDIV group of instructions will be handled by MUL-DIV-datapath
   `ifdef E203_SUPPORT_MULDIV//{
   wire muldiv_op = rv32_op & rv32_func7_0000001;
@@ -545,6 +559,7 @@ module e203_exu_decode(
 
   `endif//}
 
+  // 生成AGU单元所需的信息总线
   wire   amoldst_op = rv32_amo | rv32_load | rv32_store | rv16_lw | rv16_sw | (rv16_lwsp & (~rv16_lwsp_ilgl)) | rv16_swsp;
     // The RV16 always is word
   wire [1:0] lsu_info_size  = rv32 ? rv32_func3[1:0] : 2'b10;
@@ -615,6 +630,7 @@ module e203_exu_decode(
   //   * Branch, Store,
   //   * fence, fence_i 
   //   * ecall, ebreak  
+  // 表明是否需要将结果写入目的寄存器
   wire rv32_need_rd = 
                       (~rv32_rd_x0) & (
                     (
@@ -633,6 +649,7 @@ module e203_exu_decode(
   //   * csrrwi
   //   * csrrsi
   //   * csrrci
+  // 表明是否要读取源寄存器1
   wire rv32_need_rs1 =
                       (~rv32_rs1_x0) & (
                     (
@@ -652,6 +669,7 @@ module e203_exu_decode(
   //   * store
   //   * rv32_op
   //   * rv32_amo except the rv32_lr_w
+  // 表明是否要读取源寄存器2
   wire rv32_need_rs2 = (~rv32_rs2_x0) & (
                 (
                  (rv32_branch)
@@ -661,6 +679,7 @@ module e203_exu_decode(
                  )
                  );
 
+  // 译码32位指令的不同立即数格式，因为不同的指令类型有不同的立即数编码方式需要译码
   wire [31:0]  rv32_i_imm = { 
                                {20{rv32_instr[31]}} 
                               , rv32_instr[31:20]
@@ -729,6 +748,8 @@ module e203_exu_decode(
   
                    // It will select CIS-type immediate when
                    //    * rv16_lwsp
+
+  // 译码16位指令不同的立即数格式
   wire rv16_imm_sel_cis = rv16_lwsp;
   wire [31:0]  rv16_cis_imm ={
                           24'b0
@@ -899,6 +920,8 @@ module e203_exu_decode(
                    
   wire [31:0]  rv32_load_fp_imm  = rv32_i_imm;
   wire [31:0]  rv32_store_fp_imm = rv32_s_imm;
+
+  // 典型的5输入并行多路选择器，根据不同的32位指令立即数类型，选择生成32位指令最终的立即数
   wire [31:0]  rv32_imm = 
                      ({32{rv32_imm_sel_i}} & rv32_i_imm)
                    | ({32{rv32_imm_sel_s}} & rv32_s_imm)
@@ -914,7 +937,8 @@ module e203_exu_decode(
                    | rv32_imm_sel_u
                    | rv32_imm_sel_j
                    ;
-
+  
+  // 典型的10输入并行多路选择器，根据不同的16位指令立即数格式，选择生成16位指令最终的立即数
   wire [31:0]  rv16_imm = 
                      ({32{rv16_imm_sel_cis   }} & rv16_cis_imm)
                    | ({32{rv16_imm_sel_cili  }} & rv16_cili_imm)
@@ -944,7 +968,9 @@ module e203_exu_decode(
 
   assign need_imm = rv32 ? rv32_need_imm : rv16_need_imm; 
 
+  // 根据指令长度是32位还是16位，选择对应格式的立即数
   assign dec_imm = rv32 ? rv32_imm : rv16_imm;
+  // 当前指令对应的pc值
   assign dec_pc  = i_pc;
 
   
@@ -1175,7 +1201,7 @@ module e203_exu_decode(
   assign dec_misalgn = i_misalgn;
   assign dec_buserr  = i_buserr ;
 
-
+  // 译码出不同的非法指令情形
   assign dec_ilegl = 
             (rv_all0s1s_ilgl) 
           | (rv_index_ilgl) 

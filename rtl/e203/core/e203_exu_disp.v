@@ -26,6 +26,7 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// 派遣模块
 module e203_exu_disp(
   input  wfi_halt_exu_req,
   output wfi_halt_exu_ack,
@@ -225,7 +226,7 @@ module e203_exu_disp(
   assign disp_i_valid_pos = disp_condition & disp_i_valid; 
   assign disp_i_ready     = disp_condition & disp_i_ready_pos; 
 
-
+  
   wire [`E203_XLEN-1:0] disp_i_rs1_msked = disp_i_rs1 & {`E203_XLEN{~disp_i_rs1x0}};
   wire [`E203_XLEN-1:0] disp_i_rs2_msked = disp_i_rs2 & {`E203_XLEN{~disp_i_rs2x0}};
     // Since we always dispatch any instructions into ALU, so we dont need to gate ops here
@@ -234,22 +235,25 @@ module e203_exu_disp(
   //assign disp_o_alu_rdwen = disp_alu & disp_i_rdwen;
   //assign disp_o_alu_rdidx = {`E203_RFIDX_WIDTH{disp_alu}} & disp_i_rdidx;
   //assign disp_o_alu_info  = {`E203_DECINFO_WIDTH{disp_alu}} & disp_i_info;  
+  //将操作数派遣给ALU
   assign disp_o_alu_rs1   = disp_i_rs1_msked;
   assign disp_o_alu_rs2   = disp_i_rs2_msked;
-  assign disp_o_alu_rdwen = disp_i_rdwen;
-  assign disp_o_alu_rdidx = disp_i_rdidx;
-  assign disp_o_alu_info  = disp_i_info;  
+
+  //将指令信息派遣给ALU
+  assign disp_o_alu_rdwen = disp_i_rdwen; // 指令是否写回目的寄存器
+  assign disp_o_alu_rdidx = disp_i_rdidx; // 指令写回结果寄存器索引
+  assign disp_o_alu_info  = disp_i_info;  // 指令的信息
   
     // Why we use precise version of disp_longp here, because
     //   only when it is really dispatched as long pipe then allocate the OITF
   assign disp_oitf_ena = disp_o_alu_valid & disp_o_alu_ready & disp_alu_longp_real;
 
-  assign disp_o_alu_imm  = disp_i_imm;
-  assign disp_o_alu_pc   = disp_i_pc;
+  assign disp_o_alu_imm  = disp_i_imm; //  指令使用的立即数值
+  assign disp_o_alu_pc   = disp_i_pc;  // 该指令pc值
   assign disp_o_alu_itag = disp_oitf_ptr;
-  assign disp_o_alu_misalgn= disp_i_misalgn;
-  assign disp_o_alu_buserr = disp_i_buserr ;
-  assign disp_o_alu_ilegl  = disp_i_ilegl  ;
+  assign disp_o_alu_misalgn= disp_i_misalgn;  // 该指令取指时发生了非对齐错误
+  assign disp_o_alu_buserr = disp_i_buserr ;  // 该指令取值时发生了存储器访问错误
+  assign disp_o_alu_ilegl  = disp_i_ilegl  ;  // 该指令译码后发现是一条非法指令
 
 
 
