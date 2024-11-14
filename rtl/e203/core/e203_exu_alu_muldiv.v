@@ -93,7 +93,7 @@ module e203_exu_alu_muldiv(
   sirv_gnrl_dfflr #(1) flushed_dfflr (flushed_ena, flushed_nxt, flushed_r, clk, rst_n);
 
 
-
+  // 从Info Bus中取出相关信息
   wire i_mul    = muldiv_i_info[`E203_DECINFO_MULDIV_MUL   ];// We treat this as signed X signed
   wire i_mulh   = muldiv_i_info[`E203_DECINFO_MULDIV_MULH  ];
   wire i_mulhsu = muldiv_i_info[`E203_DECINFO_MULDIV_MULHSU];
@@ -107,12 +107,15 @@ module e203_exu_alu_muldiv(
 
   wire back2back_seq = i_b2b;
 
+  // 对操作数进行符号位扩展
   wire mul_rs1_sign = (i_mulhu)            ? 1'b0 : muldiv_i_rs1[`E203_XLEN-1];
   wire mul_rs2_sign = (i_mulhsu | i_mulhu) ? 1'b0 : muldiv_i_rs2[`E203_XLEN-1];
 
   wire [32:0] mul_op1 = {mul_rs1_sign, muldiv_i_rs1};
   wire [32:0] mul_op2 = {mul_rs2_sign, muldiv_i_rs2};
 
+
+  // 译码出乘法还是除法操作
   wire i_op_mul = i_mul | i_mulh | i_mulhsu | i_mulhu;
   wire i_op_div = i_div | i_divu | i_rem    | i_remu;
 
@@ -121,8 +124,10 @@ module e203_exu_alu_muldiv(
   // Implement the state machine for 
   //    (1) The MUL instructions
   //    (2) The DIV instructions
-  localparam MULDIV_STATE_WIDTH = 3;
 
+
+  // 使用统一的状态机来控制多周期乘法或者除法操作
+  localparam MULDIV_STATE_WIDTH = 3;
   wire [MULDIV_STATE_WIDTH-1:0] muldiv_state_nxt;
   wire [MULDIV_STATE_WIDTH-1:0] muldiv_state_r;
   wire muldiv_state_ena;
@@ -235,9 +240,10 @@ module e203_exu_alu_muldiv(
 
   localparam EXEC_CNT_W  = 6;
   localparam EXEC_CNT_1  = 6'd1 ;
-  localparam EXEC_CNT_16 = 6'd16;
-  localparam EXEC_CNT_32 = 6'd32;
+  localparam EXEC_CNT_16 = 6'd16; // 指示乘法需要总共17个迭代时钟周期
+  localparam EXEC_CNT_32 = 6'd32; // 指示乘法需要总共33个迭代时钟周期
 
+  // 实现迭代周期的计数
   wire[EXEC_CNT_W-1:0] exec_cnt_r;
   wire exec_cnt_set = state_exec_enter_ena;
   wire exec_cnt_inc = muldiv_sta_is_exec & (~exec_last_cycle); 
@@ -260,7 +266,7 @@ module e203_exu_alu_muldiv(
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 // Use booth-4 algorithm to conduct the multiplication
-
+  // 使用基4编码算法生成乘法的部分积
   wire [32:0] part_prdt_hi_r;
   wire [32:0] part_prdt_lo_r;
   wire [32:0] part_prdt_hi_nxt;
@@ -284,6 +290,7 @@ module e203_exu_alu_muldiv(
   wire booth_sel_sub  = booth_code[2];  
 
   // 35 bits adder needed
+  // 生成乘法每次迭代所需加法或者减法的操作数，并产生并行选择器
   wire [`E203_MULDIV_ADDER_WIDTH-1:0] mul_exe_alu_res = muldiv_req_alu_res;
   wire [`E203_MULDIV_ADDER_WIDTH-1:0] mul_exe_alu_op2 = 
       ({`E203_MULDIV_ADDER_WIDTH{booth_sel_zero}} & `E203_MULDIV_ADDER_WIDTH'b0) 
@@ -291,7 +298,9 @@ module e203_exu_alu_muldiv(
     | ({`E203_MULDIV_ADDER_WIDTH{booth_sel_two }} & {mul_rs2_sign,mul_rs2_sign,muldiv_i_rs2,1'b0}) 
       ;
   wire [`E203_MULDIV_ADDER_WIDTH-1:0] mul_exe_alu_op1 =
-       cycle_0th ? `E203_MULDIV_ADDER_WIDTH'b0 : {part_prdt_hi_r[32],part_prdt_hi_r[32],part_prdt_hi_r};  
+       cycle_0th ? `E203_MULDIV_ADDER_WIDTH'b0 : {part_prdt_hi_r[32],part_prdt_hi_r[32],part_prdt_hi_r}; 
+
+  // 生成乘法每次迭代所需进行加法或者减法的指示信号 
   wire mul_exe_alu_add = (~booth_sel_sub);
   wire mul_exe_alu_sub = booth_sel_sub;
 
@@ -338,6 +347,8 @@ module e203_exu_alu_muldiv(
   wire part_remd_sft1_r;
   // 34 bits adder needed
   wire [33:0] div_exe_alu_res = muldiv_req_alu_res[33:0];
+
+  // 生成除法每次迭代所需加法或者减法的操作数
   wire [33:0] div_exe_alu_op1 = cycle_0th ? dividend_lsft1[66:33] : {part_remd_sft1_r, part_remd_r[32:0]};
   wire [33:0] div_exe_alu_op2 = divisor;
   wire div_exe_alu_add = (~prev_quot);
@@ -382,7 +393,7 @@ module e203_exu_alu_muldiv(
   wire [32:0] part_quot_nxt = corrct_phase ? div_quot_corr_alu_res[32:0] :
                               (muldiv_sta_is_exec & div_exec_last_cycle) ? div_quot :
                                                           div_exe_part_remd_lsft1[32: 0];
-
+  // 判定是否需要进行商和余数的矫正，此判定需要用到加法器，将操作数发送给共享的数据通路
   wire [33:0] div_remd_chck_alu_res = muldiv_req_alu_res[33:0];
   wire [33:0] div_remd_chck_alu_op1 = {part_remd_r[32], part_remd_r};
   wire [33:0] div_remd_chck_alu_op2 = divisor;
@@ -400,12 +411,14 @@ module e203_exu_alu_muldiv(
 
   wire remd_inc_quot_dec = (part_remd_r[32] ^ divisor[33]);
 
+  // 进行商的矫正所需的加法运算，将操作数和操作类型发送给共享的数据通路
   assign div_quot_corr_alu_res = muldiv_req_alu_res[33:0];
   wire [33:0] div_quot_corr_alu_op1 = {part_quot_r[32], part_quot_r};
   wire [33:0] div_quot_corr_alu_op2 = 34'b1;
   wire div_quot_corr_alu_add = (~remd_inc_quot_dec);
   wire div_quot_corr_alu_sub = remd_inc_quot_dec;
 
+  // 进行余数矫正所需的加法运算，将操作数和操作类型发送给共享的数据通路
   assign div_remd_corr_alu_res = muldiv_req_alu_res[33:0];
   wire [33:0] div_remd_corr_alu_op1 = {part_remd_r[32], part_remd_r};
   wire [33:0] div_remd_corr_alu_op2 = divisor;
@@ -488,21 +501,24 @@ module e203_exu_alu_muldiv(
   wire req_alu_sel3 = i_op_div & muldiv_sta_is_quot_corr;
   wire req_alu_sel4 = i_op_div & muldiv_sta_is_remd_corr;
   wire req_alu_sel5 = i_op_div & muldiv_sta_is_remd_chck;
+  
 
+  // 为了与ALU的其他子单元共享数据通路，将运算所需要的操作数发送给运算数据通路及进行计算
+  // 操作数1
   assign muldiv_req_alu_op1 = 
              ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel1}} & mul_exe_alu_op1      )
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel2}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_exe_alu_op1      })
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel3}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_quot_corr_alu_op1})
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel4}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_remd_corr_alu_op1}) 
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel5}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_remd_chck_alu_op1});
-
+  // 操作数2
   assign muldiv_req_alu_op2 = 
              ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel1}} & mul_exe_alu_op2      )
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel2}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_exe_alu_op2      })
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel3}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_quot_corr_alu_op2})
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel4}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_remd_corr_alu_op2}) 
            | ({`E203_MULDIV_ADDER_WIDTH{req_alu_sel5}} & {{`E203_MULDIV_ADDER_WIDTH-34{1'b0}},div_remd_chck_alu_op2});
-
+  // 指示需要进行减法操作
   assign muldiv_req_alu_add  = 
              (req_alu_sel1 & mul_exe_alu_add      )
            | (req_alu_sel2 & div_exe_alu_add      )
@@ -517,6 +533,7 @@ module e203_exu_alu_muldiv(
            | (req_alu_sel4 & div_remd_corr_alu_sub) 
            | (req_alu_sel5 & div_remd_chck_alu_sub);
 
+  // 为了与AGU单元共享数据运算通路，将需要存储的部分积或者部分余数发送给运算数据通路进行寄存
   assign muldiv_sbf_0_ena = part_remd_ena | part_prdt_hi_ena;
   assign muldiv_sbf_0_nxt = i_op_mul ? part_prdt_hi_nxt : part_remd_nxt;
 

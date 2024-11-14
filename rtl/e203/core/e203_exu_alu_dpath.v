@@ -26,6 +26,9 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// 数据运算通路
+// ALU真正用于计算的数据通路模块
+// 被动接受其他ALU子单元的请求进行运算，然后将计算结果返回给其他子单元运算数据通路
 module e203_exu_alu_dpath(
 
   //////////////////////////////////////////////////////
@@ -176,6 +179,7 @@ module e203_exu_alu_dpath(
   // Impelment the Left-Shifter
   //
   // The Left-Shifter will be used to handle the shift op
+  // 复用移位器
   wire [`E203_XLEN-1:0] shifter_in1;
   wire [5-1:0] shifter_in2;
   wire [`E203_XLEN-1:0] shifter_res;
@@ -183,10 +187,11 @@ module e203_exu_alu_dpath(
 
   wire op_shift = op_sra | op_sll | op_srl; 
   
-     // Make sure to use logic-gating to gateoff the 
+  // Make sure to use logic-gating to gateoff the 
+  // 为了节省面积开销，将右移操作统一为左移操作
   assign shifter_in1 = {`E203_XLEN{op_shift}} &
-          //   In order to save area and just use one left-shifter, we
-          //   convert the right-shift op into left-shift operation
+  //   In order to save area and just use one left-shifter, we
+  //   convert the right-shift op into left-shift operation
            (
                (op_sra | op_srl) ? 
                  {
@@ -281,6 +286,7 @@ module e203_exu_alu_dpath(
   
 
      // Make sure to use logic-gating to gateoff the 
+  // 复用加法器
   assign adder_in1 = {`E203_ALU_ADDER_WIDTH{adder_addsub}} & (adder_op1);
   assign adder_in2 = {`E203_ALU_ADDER_WIDTH{adder_addsub}} & (adder_sub ? (~adder_op2) : adder_op2);
   assign adder_cin = adder_addsub & adder_sub;
@@ -302,7 +308,8 @@ module e203_exu_alu_dpath(
                    // The compare eq or ne instruction
              | (op_cmp_eq | op_cmp_ne); 
 
-     // Make sure to use logic-gating to gateoff the 
+  // Make sure to use logic-gating to gateoff the 
+  // 复用异或逻辑门
   assign xorer_in1 = {`E203_XLEN{xorer_op}} & misc_op1;
   assign xorer_in2 = {`E203_XLEN{xorer_op}} & misc_op2;
 
@@ -359,6 +366,7 @@ module e203_exu_alu_dpath(
 
   //////////////////////////////////////////////////////////////
   // Generate the final result
+  // 生成最终的运算数据通路结果，并生成多路选择器
   wire [`E203_XLEN-1:0] alu_dpath_res = 
         ({`E203_XLEN{op_or       }} & orer_res )
       | ({`E203_XLEN{op_and      }} & ander_res)
@@ -374,16 +382,15 @@ module e203_exu_alu_dpath(
 
   //////////////////////////////////////////////////////////////
   // Implement the SBF: Shared Buffers
+  // 实现AGU和MDV模块共享的两份33位宽的寄存器
   sirv_gnrl_dffl #(33) sbf_0_dffl (sbf_0_ena, sbf_0_nxt, sbf_0_r, clk);
   sirv_gnrl_dffl #(33) sbf_1_dffl (sbf_1_ena, sbf_1_nxt, sbf_1_r, clk);
 
-  /////////////////////////////////////////////////////////////////////
-  /////////////////////////////////////////////////////////////////////
-  /////////////////////////////////////////////////////////////////////
   //  The ALU-Datapath Mux for the requestors 
 
   localparam DPATH_MUX_WIDTH = ((`E203_XLEN*2)+21);
 
+  // 不同的子单元共用ALU的运算数据通路
   assign  {
      mux_op1
     ,mux_op2
@@ -410,6 +417,7 @@ module e203_exu_alu_dpath(
     ,op_cmp_gtu
     }
     = 
+    // 来自Regular-ALU子单元的运算请求
         ({DPATH_MUX_WIDTH{alu_req_alu}} & {
              alu_req_alu_op1
             ,alu_req_alu_op2
@@ -435,6 +443,7 @@ module e203_exu_alu_dpath(
             ,1'b0
             ,1'b0
         })
+      // 来自BJP子单元的运算请求
       | ({DPATH_MUX_WIDTH{bjp_req_alu}} & {
              bjp_req_alu_op1
             ,bjp_req_alu_op2
@@ -461,6 +470,8 @@ module e203_exu_alu_dpath(
             ,bjp_req_alu_cmp_gtu
 
         })
+      
+      //来自AGU模块的运算请求
       | ({DPATH_MUX_WIDTH{agu_req_alu}} & {
              agu_req_alu_op1
             ,agu_req_alu_op2
@@ -496,6 +507,7 @@ module e203_exu_alu_dpath(
   assign muldiv_req_alu_res  = adder_res;
 `endif//E203_SUPPORT_SHARE_MULDIV}
 
+  // 寄存器的使能信号选择来自MDV还是AGU模块
   assign sbf_0_ena = 
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
       muldiv_req_alu ? muldiv_sbf_0_ena : 
@@ -507,6 +519,7 @@ module e203_exu_alu_dpath(
 `endif//E203_SUPPORT_SHARE_MULDIV}
                  agu_sbf_1_ena;
 
+  // 寄存器的写入数据选择来自MDV还是AGU模块
   assign sbf_0_nxt = 
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
       muldiv_req_alu ? muldiv_sbf_0_nxt : 
@@ -517,10 +530,12 @@ module e203_exu_alu_dpath(
       muldiv_req_alu ? muldiv_sbf_1_nxt : 
 `endif//E203_SUPPORT_SHARE_MULDIV}
                  {1'b0,agu_sbf_1_nxt};
-
+  
+  // 将共享寄存器的值送给AGU模块
   assign agu_sbf_0_r = sbf_0_r[`E203_XLEN-1:0];
   assign agu_sbf_1_r = sbf_1_r[`E203_XLEN-1:0];
 
+  // 将共享寄存器的值送给MDV模块
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
   assign muldiv_sbf_0_r = sbf_0_r;
   assign muldiv_sbf_1_r = sbf_1_r;

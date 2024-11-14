@@ -27,10 +27,8 @@
 // ====================================================================
 `include "e203_defines.v"
 
+// 普通ALU运算
 module e203_exu_alu_rglr(
-
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
   // The Handshake Interface 
   //
   input  alu_i_valid, // Handshake valid
@@ -81,18 +79,24 @@ module e203_exu_alu_rglr(
   input  rst_n
   );
 
+  // 指示本指令的第二个操作数是否使用立即数
   wire op2imm  = alu_i_info [`E203_DECINFO_ALU_OP2IMM ];
+  // 指示本指令的第一个源操作数是否使用PC（跳转）
   wire op1pc   = alu_i_info [`E203_DECINFO_ALU_OP1PC  ];
-
+  
+  // 将操作数1发送给共享的数据通路，如果用的是PC则直接使用PC，否则使用源寄存器1
   assign alu_req_alu_op1  = op1pc  ? alu_i_pc  : alu_i_rs1;
+  // 将操作数2发送给共享的数据通路，如果使用的是立即数则选择立即数，否则使用源寄存器2
   assign alu_req_alu_op2  = op2imm ? alu_i_imm : alu_i_rs2;
 
+  
   wire nop    = alu_i_info [`E203_DECINFO_ALU_NOP ] ;
   wire ecall  = alu_i_info [`E203_DECINFO_ALU_ECAL ];
   wire ebreak = alu_i_info [`E203_DECINFO_ALU_EBRK ];
   wire wfi    = alu_i_info [`E203_DECINFO_ALU_WFI ];
 
-     // The NOP is encoded as ADDI, so need to uncheck it
+  // The NOP is encoded as ADDI, so need to uncheck it
+  // 根据指令的类型，产生所需计算的操作类型，将其发送给共享的数据通路
   assign alu_req_alu_add  = alu_i_info [`E203_DECINFO_ALU_ADD ] & (~nop);
   assign alu_req_alu_sub  = alu_i_info [`E203_DECINFO_ALU_SUB ];
   assign alu_req_alu_xor  = alu_i_info [`E203_DECINFO_ALU_XOR ];
@@ -107,6 +111,8 @@ module e203_exu_alu_rglr(
 
   assign alu_o_valid = alu_i_valid;
   assign alu_i_ready = alu_o_ready;
+
+  // 将共享数据通路的计算结果写回
   assign alu_o_wbck_wdat = alu_req_alu_res;
 
   assign alu_o_cmt_ecall  = ecall;   

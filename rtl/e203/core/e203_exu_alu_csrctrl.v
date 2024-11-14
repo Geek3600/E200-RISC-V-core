@@ -26,12 +26,12 @@
 // ====================================================================
 `include "e203_defines.v"
 
+
+// 主要负责CSR读写指令的执行
+// 根据CSR读写指令的类型产生读写CSR寄存器模块的控制信号
 module e203_exu_alu_csrctrl(
 
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
   // The Handshake Interface 
-  //
   input  csr_i_valid, // Handshake valid
   output csr_i_ready, // Handshake ready
 
@@ -39,14 +39,14 @@ module e203_exu_alu_csrctrl(
   input  [`E203_DECINFO_CSR_WIDTH-1:0] csr_i_info,
   input  csr_i_rdwen,   
 
-  output csr_ena,
-  output csr_wr_en,
-  output csr_rd_en,
-  output [12-1:0] csr_idx,
+  output csr_ena,          // 给CSR寄存器模块的CSR读写使能信号
+  output csr_wr_en,        // CSR寄存器写操作指示信号
+  output csr_rd_en,        // CSR读操作指示信号
+  output [12-1:0] csr_idx, // CSR寄存器的地址索引
 
   input  csr_access_ilgl,
-  input  [`E203_XLEN-1:0] read_csr_dat,
-  output [`E203_XLEN-1:0] wbck_csr_dat,
+  input  [`E203_XLEN-1:0] read_csr_dat, // 读操作从CSR寄存器模块中读出的数据
+  output [`E203_XLEN-1:0] wbck_csr_dat, // 写操作要写入CSR寄存器模块的数据
 
   
   `ifdef E203_HAS_CSR_EAI//{
@@ -105,7 +105,7 @@ module e203_exu_alu_csrctrl(
   assign csr_o_wbck_wdat  = read_csr_dat;
   `endif//}
 
-
+  // 从Info Bus中取出相关信息
   wire        csrrw  = csr_i_info[`E203_DECINFO_CSR_CSRRW ];
   wire        csrrs  = csr_i_info[`E203_DECINFO_CSR_CSRRS ];
   wire        csrrc  = csr_i_info[`E203_DECINFO_CSR_CSRRC ];
@@ -114,22 +114,30 @@ module e203_exu_alu_csrctrl(
   wire [4:0]  zimm   = csr_i_info[`E203_DECINFO_CSR_ZIMMM ];
   wire [11:0] csridx = csr_i_info[`E203_DECINFO_CSR_CSRIDX];
 
+
+  // 生成操作数1，如果使用立即数则直接选择立即数，否则选择源寄存器1
   wire [`E203_XLEN-1:0] csr_op1 = rs1imm ? {27'b0,zimm} : csr_i_rs1;
 
+  // 根据指令的信息生成读操作指示信号
   assign csr_rd_en = csr_i_valid & 
     (
       (csrrw ? csr_i_rdwen : 1'b0) // the CSRRW only read when the destination reg need to be writen
       | csrrs | csrrc // The set and clear operation always need to read CSR
      );
+
+  // 根据指令的信息生成写操作指示信号
   assign csr_wr_en = csr_i_valid & (
                 csrrw // CSRRW always write the original RS1 value into the CSR
                | ((csrrs | csrrc) & (~rs1is0)) // for CSRRS/RC, if the RS is x0, then should not really write                                        
             );                                                                           
-                                                                                         
+
+  // 生成访问CSR寄存器的地址索引                                                             
   assign csr_idx = csridx;
 
+  // 生成发送给CSR寄存器模块的CSR读写使能信号
   assign csr_ena = csr_o_valid & csr_o_ready & (~sel_eai);
 
+  // 生成写操作写入CSR寄存器模块的数据
   assign wbck_csr_dat = 
               ({`E203_XLEN{csrrw}} & csr_op1)
             | ({`E203_XLEN{csrrs}} & (  csr_op1  | read_csr_dat))

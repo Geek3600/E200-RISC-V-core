@@ -174,6 +174,8 @@ module e203_exu_disp(
   //             Note: if it is 3 pipeline stages, then we also need to consider the non-ALU-to-ALU 
   //                   RAW dependency.
 
+  // 只要源操作数寄存器1、2、3中的任何一个与OITF中的任一表项产生了RAW相关
+  // 则意味这当前要派遣的指令和正在执行的长指令存在RAW相关
   wire raw_dep =  ((oitfrd_match_disprs1) |
                    (oitfrd_match_disprs2) |
                    (oitfrd_match_disprs3)); 
@@ -195,8 +197,11 @@ module e203_exu_disp(
                //   it just does not change any benchmark number, so just remove that condition out. Means
                //   all of the instructions will check waw_dep
   //wire alu_waw_dep = (~disp_alu_longp_prdt) & (oitfrd_match_disprd & disp_i_rdwen); 
+
+  // 只要当前正在派遣指令的结果寄存器和OITF中的表项相同，则说明该指令和前序的长指令存在着WAW相关
   wire waw_dep = (oitfrd_match_disprd); 
 
+  // RAW和WAW两种相关性都会阻塞指令的派遣
   wire dep = raw_dep | waw_dep;
 
   // The WFI halt exu ack will be asserted when the OITF is empty
@@ -219,7 +224,7 @@ module e203_exu_disp(
                  // If it was a WFI instruction commited halt req, then it will stall the disaptch
                & (~wfi_halt_exu_req)   
                  // No dependency
-               & (~dep)   
+               & (~dep)   // 未发生RAW和WAW依赖，允许派遣的条件之一
                ////  // If dispatch to ALU as long pipeline, then must check
                ////  //   the OITF is ready
                //// & ((disp_alu & disp_o_alu_longpipe) ? disp_oitf_ready : 1'b1);
