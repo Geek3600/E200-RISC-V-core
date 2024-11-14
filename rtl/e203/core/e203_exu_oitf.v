@@ -45,25 +45,26 @@ module e203_exu_oitf (
   output ret_rdfpu,
   output [`E203_PC_SIZE-1:0] ret_pc,
 
-  // 
-  input  disp_i_rs1en,
-  input  disp_i_rs2en,
-  input  disp_i_rs3en,
-  input  disp_i_rdwen,
-  input  disp_i_rs1fpu,
-  input  disp_i_rs2fpu,
-  input  disp_i_rs3fpu,
-  input  disp_i_rdfpu,
-  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs1idx,
-  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs2idx,
-  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs3idx,
-  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rdidx,
-  input  [`E203_PC_SIZE    -1:0] disp_i_pc,
+  // 以下为派遣的长指令相关信息，有的会被存储与OITF表项中，有的会用于RAW和WAW判断
+  input  disp_i_rs1en,   // 当前派遣的指令是否需要读取第一个源操作数寄存器
+  input  disp_i_rs2en,   // 当前派遣的指令是否需要读取第二个源操作数寄存器
+  input  disp_i_rs3en,   // 当前派遣的指令是否需要读取第三个源操作数寄存器（只有浮点指令才会使用三个源操作数）
+  
+  input  disp_i_rdwen,   // 当前派遣的指令是否需要写入目的寄存器
+  input  disp_i_rs1fpu,  // 当前派遣的指令第一个源操作数是否要读取浮点通用寄存器组
+  input  disp_i_rs2fpu,  // 当前派遣的指令第二个源操作数是否要读取浮点通用寄存器组
+  input  disp_i_rs3fpu,  // 当前派遣的指令第三个源操作数是否要读取浮点通用寄存器组
+  input  disp_i_rdfpu,   // 当前派遣的指令是否要写回浮点通用寄存器组
+  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs1idx, // 当前派遣指令的第一个源操作数寄存器索引
+  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs2idx, // 当前派遣指令的第二个源操作数寄存器索引
+  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rs3idx, // 当前派遣指令的第三个源操作数寄存器索引
+  input  [`E203_RFIDX_WIDTH-1:0] disp_i_rdidx,  // 当前派遣指令的目的操作数寄存器索引
+  input  [`E203_PC_SIZE    -1:0] disp_i_pc,     // 当前派遣指令的pc值
 
-  output oitfrd_match_disprs1,
-  output oitfrd_match_disprs2,
-  output oitfrd_match_disprs3,
-  output oitfrd_match_disprd,
+  output oitfrd_match_disprs1, // 当前派遣的指令的源寄存器1与OITF中任一表项中的结果寄存器相同，即当前派遣指令与正在执行的长指令存在RAW相关
+  output oitfrd_match_disprs2, // 当前派遣的指令的源寄存器2与OITF中任一表项中的结果寄存器相同，即当前派遣指令与正在执行的长指令存在RAW相关
+  output oitfrd_match_disprs3, // 当前派遣的指令的源寄存器3与OITF中任一表项中的结果寄存器相同，即当前派遣指令与正在执行的长指令存在RAW相关
+  output oitfrd_match_disprd, // 当前派遣的指令的目的寄存器与OITF中任一表项中的结果寄存器相同，即当前派遣指令与正在执行的长指令存在WAW相关
 
   output oitf_empty,
   input  clk,
@@ -74,16 +75,17 @@ module e203_exu_oitf (
   wire [`E203_OITF_DEPTH-1:0] vld_clr;
   wire [`E203_OITF_DEPTH-1:0] vld_ena;
   wire [`E203_OITF_DEPTH-1:0] vld_nxt;
-  wire [`E203_OITF_DEPTH-1:0] vld_r;
-  wire [`E203_OITF_DEPTH-1:0] rdwen_r;
-  wire [`E203_OITF_DEPTH-1:0] rdfpu_r;
-  wire [`E203_RFIDX_WIDTH-1:0] rdidx_r[`E203_OITF_DEPTH-1:0];
+  wire [`E203_OITF_DEPTH-1:0] vld_r;    // 各表项中是否存放了有效指令的指示信号
+  wire [`E203_OITF_DEPTH-1:0] rdwen_r;  // 各表项中指令是否要写回结果寄存器
+  wire [`E203_OITF_DEPTH-1:0] rdfpu_r;  // 各表项中指令写回的结果寄存器是否属于浮点
+  wire [`E203_RFIDX_WIDTH-1:0] rdidx_r[`E203_OITF_DEPTH-1:0]; // 各表项中指令的结果寄存器索引
   // The PC here is to be used at wback stage to track out the
   //  PC of exception of long-pipe instruction
-  wire [`E203_PC_SIZE-1:0] pc_r[`E203_OITF_DEPTH-1:0];
+  wire [`E203_PC_SIZE-1:0] pc_r[`E203_OITF_DEPTH-1:0]; // 各表项中指令的pc值
 
-  wire alc_ptr_ena = dis_ena;
-  wire ret_ptr_ena = ret_ena;
+  // OITF本质上是一个FIFO，因此需要生成FIFO的读写指针
+  wire alc_ptr_ena = dis_ena; // 将派遣一个长指令的使能信号，作为写指针使能信号。派遣一条长指令，说明了要添加一个OITF表项
+  wire ret_ptr_ena = ret_ena; // 将写回一个长指令的使能信号，作为读指针使能信号。一条长指令写回，说明需要移除一个OITF表项
 
   wire oitf_full ;
   
