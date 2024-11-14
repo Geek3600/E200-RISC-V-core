@@ -203,14 +203,18 @@ module e203_exu_disp(
   //    and also there is no AMO oustanding uops 
   assign wfi_halt_exu_ack = oitf_empty & (~amo_wait);
 
+
+  // 派遣条件信号
   wire disp_condition = 
                  // To be more conservtive, any accessing CSR instruction need to wait the oitf to be empty.
                  // Theoretically speaking, it should also flush pipeline after the CSR have been updated
                  //  to make sure the subsequent instruction get correct CSR values, but in our 2-pipeline stage
                  //  implementation, CSR is updated after EXU stage, and subsequent are all executed at EXU stage,
                  //  no chance to got wrong CSR values, so we dont need to worry about this.
+                 // 如果当前派遣的指令需要访问CSR寄存器改变CSR的值，必须等待所有长指令都执行完毕oitf为空，才会允许访问CSR寄存器的指令派遣从而改变CSR的值
                  (disp_csr ? oitf_empty : 1'b1)
                  // To handle the Fence: just stall dispatch until the OITF is empty
+                // 如果当前派遣的指令属于fence和fence.I指令，同样必须等待OITF为空，也就保证了fence和fence.之前的指令都会被执行完毕 
                & (disp_fence_fencei ? oitf_empty : 1'b1)
                  // If it was a WFI instruction commited halt req, then it will stall the disaptch
                & (~wfi_halt_exu_req)   
@@ -223,6 +227,7 @@ module e203_exu_disp(
                // we always assume the LSU will need oitf ready
                & (disp_alu_longp_prdt ? disp_oitf_ready : 1'b1);
 
+  // 只有满足派遣条件时，才会发生派遣
   assign disp_i_valid_pos = disp_condition & disp_i_valid; 
   assign disp_i_ready     = disp_condition & disp_i_ready_pos; 
 

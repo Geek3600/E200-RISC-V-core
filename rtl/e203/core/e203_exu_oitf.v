@@ -24,13 +24,18 @@
 //  pipeline instruction's status and information
 //
 // ====================================================================
-`include "e203_defines.v"
 
+
+`include "e203_defines.v"
+// 在蜂鸟e200中，正在派遣的指令只可能与尚未执行完毕的长指令之间产生RAW和WAW指令
+// 该模块用于检测出与长指令的RAW和WAW相关性
+// oitf：Outstanding Instructions Track FIFO
+// 本质上是一个fifo 
 module e203_exu_oitf (
   output dis_ready,
 
-  input  dis_ena,
-  input  ret_ena,
+  input  dis_ena, // 已派遣一个长指令的使能信号，该信号用于分配一个OITF表项
+  input  ret_ena, // 已写回一个长指令的使能信号，该信号用于移除一个OITF表项
 
   output [`E203_ITAG_WIDTH-1:0] dis_ptr,
   output [`E203_ITAG_WIDTH-1:0] ret_ptr,
@@ -40,6 +45,7 @@ module e203_exu_oitf (
   output ret_rdfpu,
   output [`E203_PC_SIZE-1:0] ret_pc,
 
+  // 
   input  disp_i_rs1en,
   input  disp_i_rs2en,
   input  disp_i_rs3en,

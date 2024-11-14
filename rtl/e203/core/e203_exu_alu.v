@@ -204,18 +204,24 @@ module e203_exu_alu(
   wire alu_i_ready;
   wire bjp_i_ready;
   wire csr_i_ready;
-  wire ifu_excp_i_ready;
+  wire ifu_excp_i_ready;  
 
-  //使用对应子单元的ready信号作为反馈，给上游派遣模块的ready握手信号，表示对应子模块已经收到了派遣的指令
+  //==================================================================================================
+  // 解决资源冲突的作用
+  // 使用对应子单元的ready信号作为反馈，给上游派遣模块的ready握手信号，表示对应子模块目前处于空闲可用状态
+  // 假如指令需要被派遣到AGU子单元执行，那么agu_op信号为高电平，选择agu_i_ready信号作为i_ready的有效信号
+  // 如果当前agu模块不可用（存在资源冲突），则agu的agu_i_ready信号就会变为低电平，从而使得i_ready信号变低电平，
+  // 反馈给上游派遣模块，导致无法完成握手，进而导致告知零无法被派遣，需要一直等待直到agu_i_ready信号为高（资源冲突被解除）
+  // 其他模块同理
   assign i_ready =   (agu_i_ready & agu_op)
-                   `ifdef E203_SUPPORT_SHARE_MULDIV //{
+                   `ifdef E203_SUPPORT_SHARE_MULDIV 
                    | (mdv_i_ready & mdv_op)
-                   `endif//E203_SUPPORT_SHARE_MULDIV}
+                   `endif
                    | (alu_i_ready & alu_op)
                    | (ifu_excp_i_ready & ifu_excp_op)
                    | (bjp_i_ready & bjp_op)
-                   | (csr_i_ready & csr_op)
-                     ;
+                   | (csr_i_ready & csr_op);
+  //=====================================================================================================
 
   wire agu_i_longpipe;
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
@@ -236,6 +242,9 @@ module e203_exu_alu(
   wire [`E203_XLEN-1:0] csr_o_wbck_wdat;
   wire csr_o_wbck_err;
 
+
+  // 为了节省动态功耗，采用逻辑门控的方式，增加一级与门，对于子单元输入的信号与分组指示
+  // 信号进行与操作，那么无须使用该子单元之时，其输入信号就都是0，从而降低动态翻转功耗
   wire  [`E203_XLEN-1:0]           csr_i_rs1   = {`E203_XLEN         {csr_op}} & i_rs1;
   wire  [`E203_XLEN-1:0]           csr_i_rs2   = {`E203_XLEN         {csr_op}} & i_rs2;
   wire  [`E203_XLEN-1:0]           csr_i_imm   = {`E203_XLEN         {csr_op}} & i_imm;
