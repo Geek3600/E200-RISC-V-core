@@ -207,6 +207,7 @@ module e203_exu_disp(
 
   // The WFI halt exu ack will be asserted when the OITF is empty
   //    and also there is no AMO oustanding uops 
+  // 等待所有滞外指令已经执行完毕OITF为空，表示EXU已经完成所有操作，可以安全地进入休眠状态的反馈信号
   assign wfi_halt_exu_ack = oitf_empty & (~amo_wait);
 
 
@@ -225,6 +226,7 @@ module e203_exu_disp(
               // 可以强制限制访存操作的顺序 
                & (disp_fence_fencei ? oitf_empty : 1'b1)
                  // If it was a WFI instruction commited halt req, then it will stall the disaptch
+              // 如果已经执行了WFI指令，派遣模块便会接收到来自交付模块要求EXU单元完成所有操作并准备休眠的请求信号wfi_halt_exu_req，以阻止后续指令的派遣
                & (~wfi_halt_exu_req)   
                  // No dependency
                & (~dep)   // 未发生RAW和WAW依赖，允许派遣的条件之一

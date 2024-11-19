@@ -43,9 +43,9 @@ module e203_clk_ctrl (
 
 
   input  core_ifu_active,
-  input  core_exu_active,
-  input  core_lsu_active,
-  input  core_biu_active,
+  input  core_exu_active, // core_exu_active表示exu单元是否目前是否空闲，如果该信号为低电平，意味着空闲
+  input  core_lsu_active, // core_lsu_active表示lsu单元是否目前是否空闲，如果该信号为低电平，意味着空闲
+  input  core_biu_active, // core_biu_active表示biu单元是否目前是否空闲，如果该信号为低电平，意味着空闲 
   `ifdef E203_HAS_ITCM
   input  itcm_active,
   output itcm_ls,
@@ -74,23 +74,25 @@ module e203_clk_ctrl (
   // The CSR control bit CGSTOP will override the automatical clock gating here for special debug purpose
 
       // The IFU is always actively fetching unless it is WFI to override it
+  // 使用core_wfi信号强行将时钟门控的使能信号置低
   wire ifu_clk_en = core_cgstop | (core_ifu_active & (~core_wfi));
       // The EXU, LSU and BIU module's clock gating does not need to check
       //  WFI because it may have request from external agent
       //  and also, it actually will automactically become inactive regardess
       //  currently is WFI or not, hence we dont need WFI here
-  wire exu_clk_en = core_cgstop | (core_exu_active);
+  
+  wire exu_clk_en = core_cgstop | (core_exu_active); 
   wire lsu_clk_en = core_cgstop | (core_lsu_active);
   wire biu_clk_en = core_cgstop | (core_biu_active);
 
 
 
-
+  // 时钟门控的使能信号用于门控时钟的生成
   e203_clkgate u_ifu_clkgate(
     .clk_in   (clk        ),
     .test_mode(test_mode  ),
     .clock_en (ifu_clk_en),
-    .clk_out  (clk_core_ifu)
+    .clk_out  (clk_core_ifu) // 用于IFU单元的时钟信号
   );
 
   e203_clkgate u_exu_clkgate(

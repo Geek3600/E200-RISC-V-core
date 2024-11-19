@@ -82,7 +82,7 @@ module e203_exu_branchslv(
   //   If it is a RET instruction, it is always jump 
        | cmt_i_mret // mret指令会触发处理器退出异常模式，也会造成流水线冲刷
   //   If it is a DRET instruction, it is always jump 
-       | cmt_i_dret 
+       | cmt_i_dret // dret指令会触发处理器退出调试模式，会造成流水线冲刷
       );
 
   wire cmt_i_is_branch = (
@@ -114,6 +114,7 @@ module e203_exu_branchslv(
                          (cmt_i_fencei | (cmt_i_bjp & cmt_i_bjp_prdt)) ? (cmt_i_pc + (cmt_i_rv32 ? `E203_PC_SIZE'd4 : `E203_PC_SIZE'd2)) :
                          // 如果预测了不需要跳转，但是实际结果需要跳转，则流水线冲刷重新取指的新PC值指向跳转指令目标地址。将此跳转指令的PC加上偏移量计算目标地址
                          (cmt_i_bjp & (~cmt_i_bjp_prdt)) ? (cmt_i_pc + cmt_i_imm[`E203_PC_SIZE-1:0]) :
+                         // 如果是dret指令造成的流水线冲刷，则使用dpc的值作为重新取指的pc
                          cmt_i_dret ? csr_dpc_r :
                          //cmt_i_mret ? csr_epc_r :
                          // 如果是mret指令造成的冲刷，则使用mepc寄存器中的值作为重新取指的pc

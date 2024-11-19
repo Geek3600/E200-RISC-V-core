@@ -25,7 +25,7 @@
 //
 // ====================================================================
 
-
+// 该模块例化于e203_itcm_ctrl与e203_dtcm_ctrl模块中用于控制ITCM和DTCM的SRAM模块读写
 module sirv_1cyc_sram_ctrl #(
     parameter DW = 32,
     parameter MW = 4,
@@ -92,8 +92,8 @@ module sirv_1cyc_sram_ctrl #(
    assign ram_wem = uop_cmd_wmask[MW-1:0];          
    assign ram_din = uop_cmd_wdata[DW-1:0];          
 
+   // 为SRAM配备独立的时钟门控单元，只有在访问SRAM时（cs为高）才将其时钟打开
    wire ram_clk_en = ram_cs | tcm_cgstop;
-
    e203_clkgate u_ram_clkgate(
      .clk_in   (clk        ),
      .test_mode(test_mode  ),

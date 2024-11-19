@@ -25,6 +25,7 @@
 //
 // ====================================================================
 
+// 存放一级流水线模块
 module sirv_gnrl_pipe_stage # (
   // When the depth is 1, the ready signal may relevant to next stage's ready, hence become logic
   // chains. Use CUT_READY to control it
@@ -55,6 +56,7 @@ module sirv_gnrl_pipe_stage # (
   end//}
   else begin: dp_gt_0//{
 
+      // 流水线会配备一个有效控制位寄存器
       wire vld_set;
       wire vld_clr;
       wire vld_ena;
@@ -62,17 +64,25 @@ module sirv_gnrl_pipe_stage # (
       wire vld_nxt;
 
       // The valid will be set when input handshaked
+      // 有效位寄存器在流水线加载时置高
       assign vld_set = i_vld & i_rdy;
+
       // The valid will be clr when output handshaked
+      // 有效位寄存器在流水线清空时清零
       assign vld_clr = o_vld & o_rdy;
 
+      // 有效位寄存器在流水线加载或者流水线清空时使能
       assign vld_ena = vld_set | vld_clr;
+
+      // 置高或者清零，若同时发生，则置高优先
       assign vld_nxt = vld_set | (~vld_clr);
 
+      // 例化有效位寄存器
       sirv_gnrl_dfflr #(1) vld_dfflr (vld_ena, vld_nxt, vld_r, clk, rst_n);
 
       assign o_vld = vld_r;
 
+      // payload部分的数据通路只有在流水线加载时使能翻转，因此其load-enable使用vld-set信号
       sirv_gnrl_dffl #(DW) dat_dfflr (vld_set, i_dat, o_dat, clk);
 
       if(CUT_READY == 1) begin:cut_ready//{
@@ -378,6 +388,7 @@ endmodule
 //
 // ====================================================================
 
+// fifo 模块
 module sirv_gnrl_fifo # (
   // When the depth is 1, the ready signal may relevant to next stage's ready, hence become logic
   // chains. Use CUT_READY to control it
@@ -486,10 +497,10 @@ generate //{
     end//}
 
 
-    ///////// write fifo
     for (i=0; i<DP; i=i+1) begin:fifo_rf//{
       assign fifo_rf_en[i] = wen & wptr_vec_r[i];
       // Write the FIFO registers
+      // fifo的存储寄存器部分不使用reset复位信号
       sirv_gnrl_dffl  #(DW) fifo_rf_dffl (fifo_rf_en[i], i_dat, fifo_rf_r[i], clk);
     end//}
 

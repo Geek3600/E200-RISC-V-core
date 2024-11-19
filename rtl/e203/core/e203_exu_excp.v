@@ -145,6 +145,9 @@ module e203_exu_excp(
      // If meanwhile set and clear, then clear preempt
   wire wfi_flag_nxt = wfi_flag_set & (~wfi_flag_clr);
   sirv_gnrl_dfflr #(1) wfi_flag_dfflr (wfi_flag_ena, wfi_flag_nxt, wfi_flag_r, clk, rst_n);
+  
+  // core_wfi信号在执行了WFI指令并且其他单元都已经执行完所有操作之后，将被置高，表示处理器进入了休眠状态
+  // core_wfi信号在接收到新的中断请求后，或者进入了调试模式的请求后，将会被置低，表示退出休眠状态
   assign core_wfi = wfi_flag_r & (~wfi_flag_clr);
 
      // The wfi_halt_req will be set if there is a new WFI instruction committed
@@ -402,6 +405,7 @@ module e203_exu_excp(
                                 ;
   // The ebreak instruction will enter into the debug-mode when the ebreakm
   //    bit of DCSR reg is set
+  // ebreak指令是由ALU执行，ALU输出此指令的交付请求，交付模块根据当前dcsr寄存器中的配置决定是跳入调试模式还是异常模式
   wire alu_excp_i_ebreak4dbg = alu_excp_i_ebreak 
                                & (~alu_need_flush)// override by other alu exceptions
                                & dbg_ebreakm_r 
