@@ -23,6 +23,8 @@
 //  The lsu_ctrl module control the LSU access requests 
 //
 // ====================================================================
+// LSU顶层模块
+// LSU：Load Store Unit，蜂鸟e200核的存储器子系统的主要控制单元
 `include "e203_defines.v"
 
 module e203_lsu(

@@ -109,6 +109,7 @@ module e203_exu_alu_bjp(
   assign bjp_o_cmt_dret = dret;
   assign bjp_o_cmt_fencei = fencei;
 
+  // 根据条件跳转指令的类型，向ALU运算数据通路发送运算请求
   assign bjp_req_alu_cmp_eq  = bjp_i_info [`E203_DECINFO_BJP_BEQ  ]; 
   assign bjp_req_alu_cmp_ne  = bjp_i_info [`E203_DECINFO_BJP_BNE  ]; 
   assign bjp_req_alu_cmp_lt  = bjp_i_info [`E203_DECINFO_BJP_BLT  ]; 
@@ -120,7 +121,13 @@ module e203_exu_alu_bjp(
 
   assign bjp_o_valid     = bjp_i_valid;
   assign bjp_i_ready     = bjp_o_ready;
+
+  // 将预测的跳转结果发送给交付模块
   assign bjp_o_cmt_prdt  = bjp_i_bprdt;
+
+  // 将真实的跳转结果发送给交付模块
+  // 如果是无条件跳转指令，则一定会跳
+  // 如果是条件跳转指令，则会使用ALU数据运算通路进行比较运算的结果
   assign bjp_o_cmt_rslv  = jump ? 1'b1 : bjp_req_alu_cmp_res;
 
   assign bjp_o_wbck_wdat  = bjp_req_alu_add_res;

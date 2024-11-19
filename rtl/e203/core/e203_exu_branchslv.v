@@ -26,7 +26,7 @@
 // ====================================================================
 `include "e203_defines.v"
 
-
+// 分支预测指令交付模块
 module e203_exu_branchslv(
 
   //   The BJP condition final result need to be resolved at ALU
@@ -74,12 +74,13 @@ module e203_exu_branchslv(
   //             we need to flush the pipeline
   //             Note: the JUMP instrution will always jump, hence they will be
   //                   both predicted and resolved as true
+  // 如果预测结果与真实结果不符，预测错误，则需要产生流水线冲刷
   wire brchmis_need_flush = (
-        (cmt_i_bjp & (cmt_i_bjp_prdt ^ cmt_i_bjp_rslv)) 
+        (cmt_i_bjp & (cmt_i_bjp_prdt ^ cmt_i_bjp_rslv))//如果是条件跳转指令，并且预测结果与bjp模块比较出来的真实结果不同，说明预测错误
   //   If it is a FenceI instruction, it is always Flush 
-       | cmt_i_fencei 
+       | cmt_i_fencei // fence.I也被当做一种特殊的流水线冲刷指令来执行
   //   If it is a RET instruction, it is always jump 
-       | cmt_i_mret 
+       | cmt_i_mret // mret指令会触发处理器退出异常模式，也会造成流水线冲刷
   //   If it is a DRET instruction, it is always jump 
        | cmt_i_dret 
       );
@@ -104,14 +105,19 @@ module e203_exu_branchslv(
                                  (cmt_i_fencei | cmt_i_bjp_prdt) ? (cmt_i_rv32 ? `E203_PC_SIZE'd4 : `E203_PC_SIZE'd2)
                                     : cmt_i_imm[`E203_PC_SIZE-1:0];
   `ifdef E203_TIMING_BOOST//}
-      // Replicated two adders here to trade area with timing
+
+  // Replicated two adders here to trade area with timing
+
   assign brchmis_flush_pc = 
-                                // The fenceI is also need to trigger the flush to its next instructions
-                          (cmt_i_fencei | (cmt_i_bjp & cmt_i_bjp_prdt)) ? (cmt_i_pc + (cmt_i_rv32 ? `E203_PC_SIZE'd4 : `E203_PC_SIZE'd2)) :
-                          (cmt_i_bjp & (~cmt_i_bjp_prdt)) ? (cmt_i_pc + cmt_i_imm[`E203_PC_SIZE-1:0]) :
-                          cmt_i_dret ? csr_dpc_r :
-                          //cmt_i_mret ? csr_epc_r :
-                                       csr_epc_r ;// Last condition cmt_i_mret commented
+                         // The fenceI is also need to trigger the flush to its next instructions
+                         // 如果预测了需要跳转，但是实际结果显示不需要跳转，则流水线冲刷重新取指的新PC指向当前跳转指令的下一条指令，通过将此跳转指令的PC值加4或者2来计算下一条指令的pc值
+                         (cmt_i_fencei | (cmt_i_bjp & cmt_i_bjp_prdt)) ? (cmt_i_pc + (cmt_i_rv32 ? `E203_PC_SIZE'd4 : `E203_PC_SIZE'd2)) :
+                         // 如果预测了不需要跳转，但是实际结果需要跳转，则流水线冲刷重新取指的新PC值指向跳转指令目标地址。将此跳转指令的PC加上偏移量计算目标地址
+                         (cmt_i_bjp & (~cmt_i_bjp_prdt)) ? (cmt_i_pc + cmt_i_imm[`E203_PC_SIZE-1:0]) :
+                         cmt_i_dret ? csr_dpc_r :
+                         //cmt_i_mret ? csr_epc_r :
+                         // 如果是mret指令造成的冲刷，则使用mepc寄存器中的值作为重新取指的pc
+                         csr_epc_r ;// Last condition cmt_i_mret commented
                                                   //   to save gatecount and timing
   `endif//}
 

@@ -25,7 +25,7 @@
 // ====================================================================
 `include "e203_defines.v"
 
-
+// 交付模块中异常和中断的子模块
 module e203_exu_excp(
   output  commit_trap,
   output  core_wfi,
@@ -241,8 +241,9 @@ module e203_exu_excp(
 
 
 
-
+  // 生成冲刷请求，包括长指令造成的异常，调试中断造成的异常，普通中断造成的异常和ALU指令造成的异常
   assign excpirq_flush_req  = longp_excp_flush_req | dbg_entry_flush_req | irq_flush_req | alu_excp_flush_req;
+
   wire   all_excp_flush_req = longp_excp_flush_req | alu_excp_flush_req;
 
   assign nonalu_excpirq_flush_req_raw = 
@@ -261,6 +262,8 @@ module e203_exu_excp(
   assign excpirq_flush_add_op1 = dbg_entry_flush_req ? `E203_PC_SIZE'h800 : (all_excp_flush_req & dbg_mode) ? `E203_PC_SIZE'h808 : csr_mtvec_r;
   assign excpirq_flush_add_op2 = dbg_entry_flush_req ? `E203_PC_SIZE'h0   : (all_excp_flush_req & dbg_mode) ? `E203_PC_SIZE'h0   : `E203_PC_SIZE'b0; 
   `ifdef E203_TIMING_BOOST//}
+
+  // 生成重新取指的pc，只要不是调试中断造成的冲刷，就会使用CSR寄存器mtvec中的pc值，异常入口地址
   assign excpirq_flush_pc = dbg_entry_flush_req ? `E203_PC_SIZE'h800 : (all_excp_flush_req & dbg_mode) ? `E203_PC_SIZE'h808 : csr_mtvec_r;
   `endif//}
 
@@ -377,8 +380,8 @@ module e203_exu_excp(
 
   assign irq_req_active = wfi_flag_r ? wfi_irq_req : irq_req; 
 
+  // 根据中断的类型，更新mcause寄存器中的异常原因编号
   wire [`E203_XLEN-1:0] irq_cause;
-
   assign irq_cause[31] = 1'b1;
   assign irq_cause[30:4] = 27'b0;
   assign irq_cause[3:0]  =  (sft_irq_r & msie_r) ? 4'd3  :  // 3  Machine software interrupt
@@ -462,6 +465,7 @@ module e203_exu_excp(
                    | longp_excp_flush_req_st_buserr;
 
 
+  // 根据异常的类型，更新mcause寄存器中的异常编号，中断只有三四种，但是异常有非常多种
   wire [`E203_XLEN-1:0] excp_cause;
   assign excp_cause[31:5] = 27'b0;
   assign excp_cause[4:0]  = 
@@ -518,6 +522,9 @@ module e203_exu_excp(
   // We use the exact PC of long-instruction when exception happened, but 
   //   to note since the later instruction may already commited, so long-pipe
   //   excpetion is async-imprecise exceptions
+  
+  // 如果是长指令，则直接使用其自身的pc值更新mepc寄存器
+  // 如果是ALU指令，则当前交付接口的指令pc来更新mepc寄存器
   assign cmt_epc = longp_excp_i_valid ? longp_excp_i_pc : alu_excp_i_pc;
 
   assign cmt_cause = excp_taken_ena ? excp_cause : irq_cause;

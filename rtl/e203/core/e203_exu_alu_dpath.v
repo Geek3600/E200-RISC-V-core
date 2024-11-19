@@ -27,8 +27,8 @@
 `include "e203_defines.v"
 
 // 数据运算通路
-// ALU真正用于计算的数据通路模块
-// 被动接受其他ALU子单元的请求进行运算，然后将计算结果返回给其他子单元运算数据通路
+// 该模块时ALU真正用于计算的模块，包含加法器，ALU所处理的所有指令的实际运算均由此数据通路模块执行
+// 被动接受其他ALU子单元的请求进行运算，然后将计算结果返回给其他子单元运算的数据通路
 module e203_exu_alu_dpath(
 
   //////////////////////////////////////////////////////
@@ -127,6 +127,7 @@ module e203_exu_alu_dpath(
   wire [`E203_XLEN-1:0] mux_op1;
   wire [`E203_XLEN-1:0] mux_op2;
 
+  // 将Mux选择后的操作数送入加法器通路
   wire [`E203_XLEN-1:0] misc_op1 = mux_op1[`E203_XLEN-1:0];
   wire [`E203_XLEN-1:0] misc_op2 = mux_op2[`E203_XLEN-1:0];
 
@@ -242,7 +243,7 @@ module e203_exu_alu_dpath(
   wire [`E203_ALU_ADDER_WIDTH-1:0] misc_adder_op2 =
       {{`E203_ALU_ADDER_WIDTH-`E203_XLEN{(~op_unsigned) & misc_op2[`E203_XLEN-1]}},misc_op2};
 
-
+  //  生成加法器操作数，如果是乘除法就选乘除法的操作数，否则选择加法器的操作数
   wire [`E203_ALU_ADDER_WIDTH-1:0] adder_op1 = 
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
       muldiv_req_alu ? muldiv_req_alu_op1 :
@@ -259,6 +260,7 @@ module e203_exu_alu_dpath(
   wire [`E203_ALU_ADDER_WIDTH-1:0] adder_in2;
   wire [`E203_ALU_ADDER_WIDTH-1:0] adder_res;
 
+  // 判断所需的是加法还是减法操作
   wire adder_add;
   wire adder_sub;
 
@@ -282,15 +284,18 @@ module e203_exu_alu_dpath(
                 op_slt | op_sltu 
                ));
 
-  wire adder_addsub = adder_add | adder_sub; 
+  wire adder_addsub = adder_add | adder_sub; // 加或减
   
 
      // Make sure to use logic-gating to gateoff the 
   // 复用加法器
+  // 假设当前的操作不是加法或者减法操作，则对加法器的输入进行门控，以节省动态功耗
   assign adder_in1 = {`E203_ALU_ADDER_WIDTH{adder_addsub}} & (adder_op1);
+  // 使用取反加一的方式将减法转化成加上一个负数
   assign adder_in2 = {`E203_ALU_ADDER_WIDTH{adder_addsub}} & (adder_sub ? (~adder_op2) : adder_op2);
   assign adder_cin = adder_addsub & adder_sub;
 
+  // 最终实际的加法器数据通路，ALU的实际加法器藏在这里！！
   assign adder_res = adder_in1 + adder_in2 + adder_cin;
 
 
@@ -391,6 +396,7 @@ module e203_exu_alu_dpath(
   localparam DPATH_MUX_WIDTH = ((`E203_XLEN*2)+21);
 
   // 不同的子单元共用ALU的运算数据通路
+  // 来自ALU，BJP，AGU模块的请求信号组成一个Mux共享ALU的操作数
   assign  {
      mux_op1
     ,mux_op2
@@ -435,7 +441,7 @@ module e203_exu_alu_dpath(
             ,alu_req_alu_sra
             ,alu_req_alu_slt
             ,alu_req_alu_sltu
-            ,alu_req_alu_lui// LUI just move-Op2 operation
+            ,alu_req_alu_lui // LUI just move-Op2 operation
             ,1'b0
             ,1'b0
             ,1'b0
@@ -443,7 +449,7 @@ module e203_exu_alu_dpath(
             ,1'b0
             ,1'b0
         })
-      // 来自BJP子单元的运算请求
+      // 来自e203_exu_alu_bjp BJP子单元的运算请求
       | ({DPATH_MUX_WIDTH{bjp_req_alu}} & {
              bjp_req_alu_op1
             ,bjp_req_alu_op2
@@ -500,8 +506,11 @@ module e203_exu_alu_dpath(
         ;
         
   assign alu_req_alu_res     = alu_dpath_res[`E203_XLEN-1:0];
+  // 将ALU的加法器的运算结果返回给AGU
   assign agu_req_alu_res     = alu_dpath_res[`E203_XLEN-1:0];
   assign bjp_req_alu_add_res = alu_dpath_res[`E203_XLEN-1:0];
+
+  // 将比较器的计算结果返回给e203_exu_alu_bjp
   assign bjp_req_alu_cmp_res = cmp_res;
 `ifdef E203_SUPPORT_SHARE_MULDIV //{
   assign muldiv_req_alu_res  = adder_res;

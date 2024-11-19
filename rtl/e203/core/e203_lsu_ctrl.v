@@ -520,12 +520,19 @@ module e203_lsu_ctrl(
   wire excl_flg_r;
   wire [`E203_ADDR_SIZE-1:0] excl_addr_r;
   wire icb_cmdaddr_eq_excladdr = (arbt_icb_cmd_addr == excl_addr_r);
+  
   // Set when the Excl-load instruction going
+  // 当有一个load-reserved指令执行之时，将互斥检测器的有效标志设置起来
   wire excl_flg_set = splt_fifo_wen & arbt_icb_cmd_usr[USR_PACK_EXCL] & arbt_icb_cmd_read & arbt_icb_cmd_excl;
+  
   // Clear when any going store hit the same address
   //   also clear if there is any trap happened
+  // 当有任何一个写指令执行时，如果写指令的访存地址和互斥检测器中存储的有效地址一样，则将互斥检测器的有效标志清除掉
   wire excl_flg_clr = (splt_fifo_wen & (~arbt_icb_cmd_read) & icb_cmdaddr_eq_excladdr & excl_flg_r) 
+  // 并且如果发生了任何的异常和中断或者执行了mret指令，也会将互斥检测器的有效标志清除掉
                     | commit_trap | commit_mret;
+
+  // 当有一个load-reserved指令执行时，将互斥检测器的有效标志设置起来，也将互斥检测器中存入该指令的访存地址
   wire excl_flg_ena = excl_flg_set | excl_flg_clr;
   wire excl_flg_nxt = excl_flg_set | (~excl_flg_clr);
   sirv_gnrl_dfflr #(1) excl_flg_dffl (excl_flg_ena, excl_flg_nxt, excl_flg_r, clk, rst_n);
@@ -537,8 +544,12 @@ module e203_lsu_ctrl(
 
   // For excl-store (scond) instruction, it will be true if the flag is true and the address is matching
   wire arbt_icb_cmd_scond = arbt_icb_cmd_usr[USR_PACK_EXCL] & (~arbt_icb_cmd_read);
+
+  // 判断store-conditional指令能否执行成功
+  // 如果store-conditional指令执行时，互斥检测器里的有效位为高，且其中保存的地址值和store-conditional指令的访存地址值相同，则执行成功
   wire arbt_icb_cmd_scond_true = arbt_icb_cmd_scond & icb_cmdaddr_eq_excladdr & excl_flg_r;
   `endif//E203_SUPPORT_AMO}
+
 
   //
 
@@ -561,6 +572,7 @@ module e203_lsu_ctrl(
       (arbt_icb_cmd_scond & (~arbt_icb_cmd_scond_true)) ? {`E203_XLEN/8{1'b0}} : arbt_icb_cmd_wmask;
   `endif//E203_SUPPORT_AMO}
 
+  // 如果store-conditional指令不能执行成功，则将ICB总线成功命令通道的write-mask信号设置为0，这样就不会真的向存储器中写入数值
   `ifndef E203_SUPPORT_AMO//{
   localparam SPLT_FIFO_W = (USR_W+4);
   wire [`E203_XLEN/8-1:0] arbt_icb_cmd_wmask_pos = arbt_icb_cmd_wmask;
@@ -869,6 +881,7 @@ module e203_lsu_ctrl(
        //    because no other core to race. So we dont use the returned excl-ok, but use the LSU tracked
        //    scond_true
   //wire [`E203_XLEN-1:0] sc_excl_wdata = pre_agu_icb_rsp_excl_ok ? `E203_XLEN'd0 : `E203_XLEN'd1; 
+  // 如果store-conditional指令不能执行成功，则向结果寄存器中写入0，否则写入1
   wire [`E203_XLEN-1:0] sc_excl_wdata = arbt_icb_rsp_scond_true ? `E203_XLEN'd0 : `E203_XLEN'd1; 
                 // If it is scond (excl-write), then need to update the regfile
   assign lsu_o_wbck_wdat   = ((~pre_agu_icb_rsp_read) & pre_agu_icb_rsp_excl) ? sc_excl_wdata :
@@ -876,6 +889,8 @@ module e203_lsu_ctrl(
   `ifndef E203_SUPPORT_AMO//{
        // If not support the store-condition instructions, then we have no chance to issue excl transaction
            // no need to consider the store-condition result write-back
+  
+  // 对返回的数据进行符号扩展核操作尺寸对齐
   assign lsu_o_wbck_wdat   = 
   `endif
           ( ({`E203_XLEN{rsp_lbu}} & {{24{          1'b0}}, rdata_algn[ 7:0]})
@@ -885,9 +900,13 @@ module e203_lsu_ctrl(
           | ({`E203_XLEN{rsp_lw }} & rdata_algn[31:0]));
           
   assign lsu_o_wbck_err    = pre_agu_icb_rsp_err;
+  //产生存储器访问错误指示信号给交付接口
   assign lsu_o_cmt_buserr  = pre_agu_icb_rsp_err;// The bus-error exception generated
+  // 出现存储器访问错误的访存地址
   assign lsu_o_cmt_badaddr = pre_agu_icb_rsp_addr;
+  // 产生load指令指示信号给交付接口，将用于产生读存储器错误异常
   assign lsu_o_cmt_ld=  pre_agu_icb_rsp_read;
+  // 产生Store指令指示信号给交付接口，将用于产生写存储器或者AMO错误异常
   assign lsu_o_cmt_st= ~pre_agu_icb_rsp_read;
 
   assign lsu_ctrl_active = (|arbt_bus_icb_cmd_valid_raw) | splt_fifo_o_valid;

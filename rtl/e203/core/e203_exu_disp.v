@@ -132,6 +132,7 @@ module e203_exu_disp(
   wire disp_alu_longp_real = disp_o_alu_longpipe;
 
   // Both fence and fencei need to make sure all outstanding instruction have been completed
+  // 判断当前指令是fence或者fencei指令
   wire disp_fence_fencei   = (disp_i_info_grp == `E203_DECINFO_GRP_BJP) & 
                                ( disp_i_info [`E203_DECINFO_BJP_FENCE] | disp_i_info [`E203_DECINFO_BJP_FENCEI]);   
 
@@ -219,7 +220,9 @@ module e203_exu_disp(
                  // 如果当前派遣的指令需要访问CSR寄存器改变CSR的值，必须等待所有长指令都执行完毕oitf为空，才会允许访问CSR寄存器的指令派遣从而改变CSR的值
                  (disp_csr ? oitf_empty : 1'b1)
                  // To handle the Fence: just stall dispatch until the OITF is empty
-                // 如果当前派遣的指令属于fence和fence.I指令，同样必须等待OITF为空，也就保证了fence和fence.之前的指令都会被执行完毕 
+              // 如果当前派遣的指令属于fence和fence.I指令，同样必须等待OITF为空，也就保证了在Fence和Fence.I之前的所有滞外指令都会被执行完毕
+              // OITF记录所有正在执行的长指令的表项
+              // 可以强制限制访存操作的顺序 
                & (disp_fence_fencei ? oitf_empty : 1'b1)
                  // If it was a WFI instruction commited halt req, then it will stall the disaptch
                & (~wfi_halt_exu_req)   
@@ -256,6 +259,8 @@ module e203_exu_disp(
   
     // Why we use precise version of disp_longp here, because
     //   only when it is really dispatched as long pipe then allocate the OITF
+  // 在派遣点产生OITF分配表项的使能信号
+  // 如果当前派遣的指令为一个长指令，并且已经通过握手，则产生此使能信号
   assign disp_oitf_ena = disp_o_alu_valid & disp_o_alu_ready & disp_alu_longp_real;
 
   assign disp_o_alu_imm  = disp_i_imm; //  指令使用的立即数值

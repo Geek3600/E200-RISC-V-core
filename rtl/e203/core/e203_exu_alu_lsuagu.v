@@ -33,6 +33,7 @@
 // 访存地址生成AGU
 // 主要负责load，store和A扩展指令的地址生成
 // 以及A扩展指令的微操作拆分和执行
+// AGU的源代码模块，主要实现了控制和选择，并没有实际使用激加法器，加法器在数据通路中
 module e203_exu_alu_lsuagu(
 
   //////////////////////////////////////////////////////////////
@@ -98,17 +99,18 @@ module e203_exu_alu_lsuagu(
   input  [`E203_XLEN-1:0]      agu_icb_rsp_rdata,
 
 
-  //////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////
-  // To share the ALU datapath, generate interface to ALU
+  //   To share the ALU datapath, generate interface to ALU
   //   for single-issue machine, seems the AGU must be shared with ALU, otherwise
   //   it wasted the area for no points 
   // 
      // The operands and info to ALU
+  //==============================================================================
+  // 输出加法操作所需的操作数和运算类型，ALU共享数据通路将实际使用这些信号进行加法运算
   output [`E203_XLEN-1:0] agu_req_alu_op1,
   output [`E203_XLEN-1:0] agu_req_alu_op2,
-  output agu_req_alu_swap,
   output agu_req_alu_add ,
+  //===========================================================================
+  output agu_req_alu_swap,
   output agu_req_alu_and ,
   output agu_req_alu_or  ,
   output agu_req_alu_xor ,
@@ -141,7 +143,7 @@ module e203_exu_alu_lsuagu(
   wire       agu_i_store   = agu_i_info [`E203_DECINFO_AGU_STORE  ] & (~flush_block);
   wire       agu_i_amo     = agu_i_info [`E203_DECINFO_AGU_AMO    ] & (~flush_block);
 
-  wire [1:0] agu_i_size    = agu_i_info [`E203_DECINFO_AGU_SIZE   ];
+  wire [1:0] agu_i_size    = agu_i_info [`E203_DECINFO_AGU_SIZE   ]; // 指的是
   wire       agu_i_usign   = agu_i_info [`E203_DECINFO_AGU_USIGN  ];
   wire       agu_i_excl    = agu_i_info [`E203_DECINFO_AGU_EXCL   ];
   wire       agu_i_amoswap = agu_i_info [`E203_DECINFO_AGU_AMOSWAP];
@@ -167,12 +169,17 @@ module e203_exu_alu_lsuagu(
     `endif//}
   `endif//}
 
-  wire agu_i_size_b  = (agu_i_size == 2'b00);
-  wire agu_i_size_hw = (agu_i_size == 2'b01);
-  wire agu_i_size_w  = (agu_i_size == 2'b10);
+  //判断当前读、写指令访问内存的操作尺寸
+  //操作尺寸指的是指令长度，RV32的操作尺寸是32位（4个字节），RV16操作尺寸16位（2个字节）
+  wire agu_i_size_b  = (agu_i_size == 2'b00); // 操作尺寸为一个字节 byte 8位
+  wire agu_i_size_hw = (agu_i_size == 2'b01); // 操作尺寸位一个半字half-word hw 16位
+  wire agu_i_size_w  = (agu_i_size == 2'b10); // 操作尺寸为一个字word 32位
 
+  //判断当前访存地址是否与操作尺寸对齐
   wire agu_i_addr_unalgn = 
+            // 如果地址最低位不为0，意味着与半字不对齐
             (agu_i_size_hw &  agu_icb_cmd_addr[0])
+          // 如果地址最低两位不为0，意味着与字不对齐
           | (agu_i_size_w  &  (|agu_icb_cmd_addr[1:0]));
 
   wire state_last_exit_ena;
@@ -222,6 +229,7 @@ module e203_exu_alu_lsuagu(
   wire agu_i_ofst0  = agu_i_amo | ((agu_i_load | agu_i_store) & agu_i_excl); 
 
 
+  // 以下状态机控制AMO指令的拆分
   localparam ICB_STATE_WIDTH = 4;
 
   wire icb_state_ena;
@@ -229,22 +237,35 @@ module e203_exu_alu_lsuagu(
   wire [ICB_STATE_WIDTH-1:0] icb_state_r;
 
   // State 0: The idle state, means there is no any oustanding ifetch request
+  // 空闲状态，该状态下可以发送第一次读操作
   localparam ICB_STATE_IDLE = 4'd0;
   `ifdef E203_SUPPORT_AMO//{
+  
   // State  : Issued first request and wait response
+  // 已经发送了第一次读操作，等待读数据返回的状态
   localparam ICB_STATE_1ST  = 4'd1;
+
   // State  : Wait to issue second request 
+  // 发送第二次写操作的状态
   localparam ICB_STATE_WAIT2ND  = 4'd2;
+  
   // State  : Issued second request and wait response
+  // 已经发送了第二次写操作，等待反馈返回的状态
   localparam ICB_STATE_2ND  = 4'd3;
+  
   // State  : For AMO instructions, in this state, read-data was in leftover
   //            buffer for ALU calculation 
+  // 受到第一次读操作返回的读数据后，复用ALU的运算数据通路进行运算的状态
   localparam ICB_STATE_AMOALU  = 4'd4;
+
   // State  : For AMO instructions, in this state, ALU have caculated the new
   //            result and put into leftover buffer again 
+  // 进行运算后的结果已经寄存在电路中准备好，并正在发送写操作的状态
   localparam ICB_STATE_AMORDY  = 4'd5;
+
   // State  : For AMO instructions, in this state, the response data have been returned
   //            and the write back result to commit/wback interface
+  // 写操作的反馈已经返回，将指令的结果写回寄存器中的状态
   localparam ICB_STATE_WBCK  = 4'd6;
   `endif//E203_SUPPORT_AMO}
   
@@ -375,10 +396,10 @@ module e203_exu_alu_lsuagu(
           `endif//E203_SUPPORT_AMO}
               ;
 
-
+  // 状态机的状态寄存器 
   sirv_gnrl_dfflr #(ICB_STATE_WIDTH) icb_state_dfflr (icb_state_ena, icb_state_nxt, icb_state_r, clk, rst_n);
 
-
+  
   `ifdef E203_SUPPORT_AMO//{
   wire  icb_sta_is_last = icb_sta_is_wbck;
   `endif//E203_SUPPORT_AMO}
@@ -429,6 +450,8 @@ module e203_exu_alu_lsuagu(
   wire amo_1stuop = icb_sta_is_1st & agu_i_algnamo;
   wire amo_2nduop = icb_sta_is_2nd & agu_i_algnamo;
  `endif//E203_SUPPORT_AMO}
+
+  // 寄存第一次读操作返回的数据，但是此模块并没有实际例化寄存器，而是使用ALU的数据通路模块中的寄存器
   assign leftover_ena = agu_icb_rsp_hsked & (
                    1'b0
                    `ifdef E203_SUPPORT_AMO//{
@@ -436,6 +459,7 @@ module e203_exu_alu_lsuagu(
                    | amo_2nduop 
                    `endif//E203_SUPPORT_AMO}
                    );
+  
   assign leftover_nxt = 
               {`E203_XLEN{1'b0}}
          `ifdef E203_SUPPORT_AMO//{
@@ -452,6 +476,7 @@ module e203_exu_alu_lsuagu(
          ;
   //
   // The instantiation of leftover buffer is actually shared with the ALU SBF-0 Buffer
+  // 
   assign agu_sbf_0_ena = leftover_ena;
   assign agu_sbf_0_nxt = leftover_nxt;
   assign leftover_r    = agu_sbf_0_r;
@@ -471,7 +496,7 @@ module e203_exu_alu_lsuagu(
   assign agu_sbf_1_nxt   = leftover_1_nxt;
   assign leftover_1_r = agu_sbf_1_r;
 
-
+  // 指示需要加法操作
   assign agu_req_alu_add  = 1'b0
                      `ifdef E203_SUPPORT_AMO//{
                            | (icb_sta_is_amoalu & agu_i_amoadd)
@@ -483,6 +508,8 @@ module e203_exu_alu_lsuagu(
                            | icb_sta_is_idle
                            ;
 
+  // 加法器所需的操作数1来自于寄存器索引的rs1操作数
+  // 向ALU共享的数据通路发送操作数
   assign agu_req_alu_op1 =  icb_sta_is_idle   ? agu_i_rs1
                      `ifdef E203_SUPPORT_AMO//{
                           : icb_sta_is_amoalu ? leftover_r
@@ -493,7 +520,7 @@ module e203_exu_alu_lsuagu(
                           : `E203_XLEN'd0 
                      `endif//}
                      ;
-
+  // 加法器所需的操作数来自于立即数
   wire [`E203_XLEN-1:0] agu_addr_gen_op2 = agu_i_ofst0 ? `E203_XLEN'b0 : agu_i_imm;
   assign agu_req_alu_op2 =  icb_sta_is_idle   ? agu_addr_gen_op2 
                      `ifdef E203_SUPPORT_AMO//{
@@ -505,7 +532,7 @@ module e203_exu_alu_lsuagu(
                           : `E203_XLEN'd0 
                      `endif//}
                      ;
-
+  // 向ALU共享的运算数据通路发送具体的运算类型
   `ifdef E203_SUPPORT_AMO//{
   assign agu_req_alu_swap = (icb_sta_is_amoalu & agu_i_amoswap );
   assign agu_req_alu_and  = (icb_sta_is_amoalu & agu_i_amoand  );
@@ -611,16 +638,22 @@ module e203_exu_alu_lsuagu(
                       )
                 ;
   assign agu_o_cmt_badaddr = agu_icb_cmd_addr;
-
-
+    
+  // 产生非对齐指示信号给交付接口
   assign agu_o_cmt_misalgn = (1'b0
                 `ifdef E203_SUPPORT_AMO//{
                        | agu_i_unalgnamo 
                 `endif//E203_SUPPORT_AMO}
+                
                        | (agu_i_unalgnldst) //& agu_i_excl) We dont support unaligned load/store regardless it is AMO or not
                        )
                        ;
+  // 产生load指令指示信号给交付接口
+  // 将用于产生读存储器地址不对齐异常 
   assign agu_o_cmt_ld      = agu_i_load & (~agu_i_excl); 
+
+  // 产生store和AMO指令指示信号给交付接口
+  // 将用于产生存储器或AMO地址不对齐异常
   assign agu_o_cmt_stamo   = agu_i_store | agu_i_amo | agu_i_excl;
 
   
@@ -633,11 +666,13 @@ module e203_exu_alu_lsuagu(
 
 
   
-
+  // 产生ICB接口的cmd_valid信号
   assign agu_icb_cmd_valid = 
+            // 只有地址对齐（不产生异常）的指令才会生成cmd_valid
             ((agu_i_algnldst & agu_i_valid)
               // We must qualify the agu_o_ready signal from commit stage
               // to make sure it is out to commit/LSU at same cycle
+            // 为了保证指令被同时发送给交付接口和ICB接口，必须与上交付接口的接收ready信号 agu_o_ready
               & (agu_o_ready)
             )
           `ifdef E203_SUPPORT_AMO//{
@@ -650,6 +685,8 @@ module e203_exu_alu_lsuagu(
             | (agu_i_unalgnamo & 1'b0) 
           `endif//E203_SUPPORT_AMO}
             ;
+  // 使用ALU共享数据通路模块（实际的加法器所在）进行加法运算得到的结果作为读写指令的访存地址
+  // 产生ICB接口的 cmd_addr信号，（使用ALU的加法计算结果）和 cmd_read 信号
   assign agu_icb_cmd_addr = agu_req_alu_res[`E203_ADDR_SIZE-1:0];
 
   assign agu_icb_cmd_read = 
@@ -665,6 +702,7 @@ module e203_exu_alu_lsuagu(
      //       wmask is generated according to the LSB and size
 
 
+  // 产生ICB接口的cmd_wdata和cmd_wnask信号，由于需经过32位宽的ICB总线，所以必须经过操作尺寸对齐操作
   wire [`E203_XLEN-1:0] algnst_wdata = 
             ({`E203_XLEN{agu_i_size_b }} & {4{agu_i_rs2[ 7:0]}})
           | ({`E203_XLEN{agu_i_size_hw}} & {2{agu_i_rs2[15:0]}})
@@ -707,8 +745,7 @@ module e203_exu_alu_lsuagu(
 
   assign agu_icb_cmd_itag     = agu_i_itag;
   assign agu_icb_cmd_usign    = agu_i_usign;
-  assign agu_icb_cmd_size     = 
-                agu_i_size;
+  assign agu_icb_cmd_size     = agu_i_size;
 
 
 endmodule                                      
