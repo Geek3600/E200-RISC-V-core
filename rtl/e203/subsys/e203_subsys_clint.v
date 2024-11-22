@@ -27,7 +27,7 @@
 
 `include "e203_defines.v"
 
-
+// CLINT顶层
 module e203_subsys_clint(
   input                          clint_icb_cmd_valid,
   output                         clint_icb_cmd_ready,

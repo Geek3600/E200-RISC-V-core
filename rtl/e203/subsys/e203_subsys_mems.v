@@ -28,7 +28,7 @@
 
 `include "e203_defines.v"
 
-
+// 子系统存储部分顶层
 module e203_subsys_mems(
   input                          mem_icb_cmd_valid,
   output                         mem_icb_cmd_ready,

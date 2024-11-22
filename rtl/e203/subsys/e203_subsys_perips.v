@@ -27,7 +27,7 @@
 
 `include "e203_defines.v"
 
-
+// 子系统外设部分顶层
 module e203_subsys_perips(
   input                          ppi_icb_cmd_valid,
   output                         ppi_icb_cmd_ready,

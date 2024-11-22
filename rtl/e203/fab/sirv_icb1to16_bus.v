@@ -25,6 +25,7 @@
 //
 // ====================================================================
 
+// 将1组ICB总线转换成16路ICB总线
 module sirv_icb1to16_bus # (
   parameter ICB_FIFO_DP = 0, // This is to optionally add the pipeline stage for ICB bus
                              //   if the depth is 0, then means pass through, not add pipeline

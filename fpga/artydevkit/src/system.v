@@ -1353,7 +1353,7 @@ module system
   IOBUF_dwakeup_n
   (
     .O(iobuf_dwakeup_o),
-    .IO(btn_3),
+    .IO(btn_3), // 按键
     .I(1'b1),
     .T(1'b1)
   );

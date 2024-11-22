@@ -28,7 +28,7 @@
 
 `include "e203_defines.v"
 
-
+// 子系统主体部分顶层，可关电
 module e203_subsys_main(
   output core_csr_clk,
 

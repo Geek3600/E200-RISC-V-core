@@ -28,6 +28,7 @@
 
 `include "e203_defines.v"
 
+// 子系统顶层文件
 module e203_subsys_top(
   // This clock should comes from the crystal pad generated high speed clock (16MHz)
   input  hfextclk,

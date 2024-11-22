@@ -28,7 +28,7 @@
 
 `include "e203_defines.v"
 
-
+// PLIC顶层
 module e203_subsys_plic(
   input                          plic_icb_cmd_valid,
   output                         plic_icb_cmd_ready,
